@@ -1,10 +1,9 @@
-
 from imps import *
 
 # Stati celle in "visited"
-# 0 = bianco (mai vista)
-# 1 = giallo (visitata)
-# 2 = nero (bloccata con 4 muri)
+# 0 = white (not yet visited)
+# 1 = giallo (visited)
+# 2 = nero (NOT VISITABLE)
 # 3 = blu (B)
 # 4 = verde (G)
 # 5 = grigio (M)
@@ -14,12 +13,13 @@ def main():
     cv2.namedWindow('Campo', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Campo', VIEW_W, VIEW_H)
 
+    """
+        Handles the input. Returns 'quit' o 'repath' only when in need to stop the autopilot.
+            - ACTIONS TO MODIFY THE MAP (1-4, N, B, G, M): applies now but does not stop the autopilot;
+            if an obstacle is created, the path will fail the next step and it will be recalculated
+            - ACTIONS TO MODIFY THE MAP (W/A/D/S) or change of target (T/E): stop and ask for recalculations.
+    """
     def handle_key(k):
-        """Gestisce input. Restituisce 'quit' o 'repath' solo quando serve fermare l'autopilota.
-        - AZIONI DI MODIFICA MAPPA (1-4, N, B, G, M): applica subito ma NON ferma l'autopilota;
-          se crei un ostacolo, al passo successivo il path fallirà e verrà ricalcolato.
-        - AZIONI MANUALI DI MOVIMENTO (W/A/D/S) o cambio target (T/E): fermano e richiedono ricalcolo.
-        """
         if k == ord('q') or k == 27:
             return 'quit'
         # --- controllo manuale: interrompe autopilota ---
@@ -65,6 +65,10 @@ def main():
             return 'repath'
         return None
 
+    """
+        It acts as an intelligent pause during the autopilot's automatic movement,
+        allowing for new input to come
+    """
     def on_step():
         # pausa in cui ascolto input per permettere muro/colori in corsa
         end_t = time.time() + (STEP_DELAY_MS / 1000.0)
@@ -80,16 +84,23 @@ def main():
                 need_stop = True
         return need_stop
 
+    """
+        EntryPoint
+    """
     while True:
+        #-- Renders the matrix
         frame = world.render()
+        
+        #-- Shows the field (matrix)
         cv2.imshow('Campo', frame)
         key = cv2.waitKey(0) & 0xFF
 
+        #-- Handles the command that arrives 
         res = handle_key(key)
         if res == 'quit':
             break
 
-        # autopilota semplice: T/E per avviare; se bloccato, premi T/E di nuovo per ricalcolare
+        #-- Simple autopilot: T/E to start; il stuck press T/E again to allow recalculation
         if world.mode in ('to_target', 'to_home'):
             start = (world.x, world.y)
             goal = world.target if world.mode == 'to_target' else world.home
@@ -98,8 +109,8 @@ def main():
                 world.mode = 'idle'
                 continue
             completed = world.follow_path(path, on_step=on_step, stop_when_home=(world.mode=='to_home'))
-            if not completed:
-                # si è bloccato: attendi nuovo T/E per ripartire
+            if not completed: 
+                #-- locked: wait for next T/E for restarting
                 continue
             if world.mode == 'to_home' and (world.x, world.y) == world.home:
                 break

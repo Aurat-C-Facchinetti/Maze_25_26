@@ -23,19 +23,31 @@ class World:
         self.expand_double()
 
     # ---------- util direzione ----------
+    """
+        Translates degrees into direction 
+    """
     @staticmethod
     def dir_index_from_deg(deg):
         # 0=N,1=E,2=S,3=W
         return ((deg // 90) % 4)
 
+    """
+        Translates the direction into bits
+    """
     @staticmethod
     def bit_for_dir(idx):
         return [1, 2, 4, 8][idx]
 
+    """
+        Revers the direction
+    """
     @staticmethod
     def opposite_dir(idx):
         return (idx + 2) % 4
 
+    """
+        Heads towards the delta (how much we have to move)
+    """
     def heading_to_delta(self):
         if self.deg == 0:
             return (0, -1)
@@ -51,31 +63,39 @@ class World:
             self.deg = r % 360
             return self.heading_to_delta()
 
+    """
+        Normalizes degrees (interval: 0-360)
+    """
     def normalize_deg(self):
         self.deg = ((self.deg % 360) + 360) % 360
 
     # ---------- azioni player ----------
+    "Function to rotate left"
     def rotate_left(self):
         self.deg -= 90
         self.normalize_deg()
 
+    "Function to rotate right"
     def rotate_right(self):
         self.deg += 90
         self.normalize_deg()
 
+    "Function to flip direction: used when we will be stuck"
     def flip_direction(self):
         self.deg += 180
         self.normalize_deg()
 
+    "Function to visit the current cell flagging the cell as visited"
     def visit_current(self):
         # non sovrascrivere stati speciali (2..5)
         if self.visited[self.y, self.x] == 0:
             self.visited[self.y, self.x] = 1
 
+    """ Doubles the matrix keeping the data centered (visited + walls)
+        Returns the applied shift (off_x, off_y) to re-align the target coordinates
+    """
     def expand_double(self):
-        """Raddoppia la matrice mantenendo dati centrati (visited + walls).
-        Ritorna lo shift applicato (off_x, off_y) per riallineare coordinate target.
-        """
+        
         oh, ow = self.visited.shape
         nh, nw = oh * 2, ow * 2
         # guardia anti OOM
@@ -100,11 +120,12 @@ class World:
             tx, ty = self.target
             self.target = (tx + off_x, ty + off_y)
         return off_x, off_y
-
+        
+    """ Expand until (gx,gy) fits within the boundaries. Returns the realigned coordinates (gx,gy).
+        If the maximum limit is exceeded, does not expand and returns the clamped coordinates.
+    """
     def ensure_inside(self, gx, gy):
-        """Espandi finché (gx,gy) entra. Restituisce le coordinate riallineate (gx,gy).
-        Se supera il limite massimo, non espande e ritorna le coordinate clampate.
-        """
+        
         safety = 0
         while gx < 0 or gx >= self.w or gy < 0 or gy >= self.h:
             off_x, off_y = self.expand_double()
@@ -121,6 +142,9 @@ class World:
                 break
         return gx, gy
 
+    """
+        Sets or remove a wall in an absolute position of the matrix
+    """
     def set_wall_absolute(self, gx, gy, dir_idx, value=1):
         bit = self.bit_for_dir(dir_idx)
         if value:
@@ -128,10 +152,17 @@ class World:
         else:
             self.walls[gy, gx] &= (~bit) & 0xF
 
+    """
+        Fa la stessa cosa di quello sopra (TODO: Capire perchè è così)
+    """
     def toggle_wall_absolute(self, gx, gy, dir_idx):
         bit = self.bit_for_dir(dir_idx)
         self.walls[gy, gx] ^= bit
 
+    """
+        Sets a wall realtive to player's position in both cells
+        (the player's one and also sets the opposite wall)
+    """
     def set_wall_relative(self, rel_idx, toggle=True):
         """rel_idx: 0=fronte,1=destra,2=retro,3=sinistra rispetto all'heading."""
         cur_abs = self.dir_index_from_deg(self.deg)
@@ -147,6 +178,13 @@ class World:
             self.set_wall_absolute(nx, ny, self.opposite_dir(abs_idx), 1)
         self.visit_current()
 
+    """
+        1. Checks if there is a wall in the direction where the player is pointing (forward).
+        2. Calculate the new position exploiting heading_to_delta and ensure_inside (inside the matrix)
+        3. Checks if there is another wall 
+        4. Checks if the next cell is black or visited.
+        5. If it can move, it does (coloring the cell in yellow).
+    """
     def forward(self):
         dir_idx = self.dir_index_from_deg(self.deg)
         bit = self.bit_for_dir(dir_idx)
@@ -166,16 +204,18 @@ class World:
             self.visit_current()
         return moved
 
+    """
+        Costo di ingresso nella cella in base allo stato.
+        0 (white) -> 1 unexplored
+        1 (yellow) -> 2 Explore but empty
+        2 (black)   -> (np.inf) You shall not pass (Not visitable)
+        3 (blue)    -> 3  Wait 5 seconds (TODO: Check rule)
+        4 (green)  -> 3 Uphill / Downhill
+        5 (grey) -> 2 Checkpoint
+    """
     # ---------- info celle ----------
     def cell_cost(self, val):
-        """Costo di ingresso nella cella in base allo stato.
-        0 (bianca) -> 1 Inesplorata
-        1 (gialla) -> 2 Esplorata vuota
-        2 (nera)   -> (np.inf) Impassabile
-        3 (blu)    -> 3 Devi fermarti 5 secondi (TODO: Check regolamento)
-        4 (verde)  -> 3 Salita / Discesa
-        5 (grigia) -> 2 Checkpoint
-        """
+        
         variabile = 2
         
         if val == 0:
@@ -193,8 +233,11 @@ class World:
         
         return variabile
 
+    """
+        Returns a dictionary with useful info about the cell
+    """
     def get_cell_info(self, gx, gy):
-        """Ritorna un dizionario con info utili sulla cella."""
+        
         val = int(self.visited[gy, gx])
         return {
             "x": gx,
@@ -206,6 +249,9 @@ class World:
         }
 
     # ---------- pathfinding ----------
+    """
+        Return the list of reachable adjacent cells
+    """
     def neighbors(self, gx, gy):
         res = []
         for idx, (dx, dy) in enumerate([(0,-1),(1,0),(0,1),(-1,0)]):
@@ -223,8 +269,11 @@ class World:
             res.append((nx, ny))
         return res
 
+    """ 
+        True if we can go from (x,y) to (nx,ny) now. (Considering walls and obstacles)
+    """
     def can_step_to(self, x, y, nx, ny):
-        """True se si può andare da (x,y) a (nx,ny) ora (rispetta muri e blocchi)."""
+        
         dx, dy = nx - x, ny - y
         if (abs(dx) + abs(dy)) != 1:
             return False
@@ -243,6 +292,9 @@ class World:
             return False
         return True
 
+    """
+        Finds the best path using the dijkstra algorithm
+    """
     def dijkstra(self, start, goal):
         import heapq
         sx, sy = start
@@ -283,9 +335,15 @@ class World:
         path.reverse()
         return path
 
+    """
+        Returns the coordinate of the bottom right cell 
+    """
     def bottom_right_cell(self):
         return (self.w - 1, self.h - 1)
 
+    """
+        Choose which direction to take in order to get to the target point
+    """
     def face_towards(self, nx, ny):
         dx = np.sign(nx - self.x)
         dy = np.sign(ny - self.y)
@@ -307,8 +365,12 @@ class World:
             else:
                 self.rotate_right()
 
+    """
+        Segui il path passo-passo. Ritorna True se completato, False se bloccato/interrotto.
+        Follows the path step-by-step. Return true if complete, false if stuck.
+    """
     def follow_path(self, path, on_step=None, stop_when_home=False):
-        """Segui il path passo-passo. Ritorna True se completato, False se bloccato/interrotto."""
+        
         for (nx, ny) in path:
             # orienta verso la prossima cella e prova ad avanzare
             self.face_towards(nx, ny)
@@ -322,6 +384,9 @@ class World:
         return True
 
     # ---------- rendering ----------
+    """
+        Draws and renders the matrix
+    """
     def render(self):
         # viewport centrato sul player, clamp ai bordi
         start_c = max(0, min(self.w - VIEW_COLS, self.x - VIEW_COLS // 2)) if self.w > VIEW_COLS else 0
