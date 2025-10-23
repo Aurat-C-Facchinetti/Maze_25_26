@@ -11,7 +11,7 @@ verrò utilizzato un terzo parametro per retrocompatibiltà con codice già esis
 
 --- FEATURES --- 
 - h --> gestione harmed victim : lancio di due cubi e (forse) accensione led. **Prototipo metodo: invia(h0,);** dove 0 e 1 rappresentano destra e sinitra
-- s --> gestione stable victim : lancio di un cubo e (forse) accensione led. **Prototipo metodo: invia(s0,);** dove 0 e 1 rappresentano destra e sinitra
+- y --> gestione stable victim : lancio di un cubo e (forse) accensione led. **Prototipo metodo: invia(s0,);** dove 0 e 1 rappresentano destra e sinitra
 - u --> gestione unharmed victim : (forse) accensione led. **Prototipo metodo: invia(u,);**
 
 --- SENSORI ---
