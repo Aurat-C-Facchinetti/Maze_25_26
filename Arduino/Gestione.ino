@@ -12,16 +12,9 @@
 
 #pragma region COSTRUTTORI
 
-// Costruttore giroscopio
-Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29, &Wire);
-
-// Costruttore TOF
-Adafruit_VL6180X vl = Adafruit_VL6180X();
-
-// Costruttore TOF_LONG
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-
-// Costruttore Sensore colore
+Adafruit_BNO055   bno = Adafruit_BNO055(55, 0x29, &Wire);
+Adafruit_VL6180X  vl;
+Adafruit_VL53L0X  lox;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
 #pragma endregion
@@ -35,7 +28,6 @@ volatile long tickCount = 0;
 
 /*
   CANALI
-
   0 -> Giroscopio (BNO055)
   1 -> ToF corto (VL6180X)
   2 -> Colore (TCS34725)
@@ -61,82 +53,56 @@ volatile long tickCount = 0;
 
 #pragma endregion
 
-void setup() {
-  Serial.begin(115200);
-  Wire.begin();
-  while (!Serial) delay(10);  // aspetta che la seraile si apra
-
-  // inizializziamo i sensori
-  iniziaGyro();
-  iniziaToF();
-  iniziaTOF_LONG();
-  iniziaColorSensor();
-
-  // encoder
-  /*
-  pinMode(dirDx, OUTPUT);
-  pinMode(dirSx, OUTPUT);
-  pinMode(velDx, OUTPUT);
-  pinMode(velSx, OUTPUT);
-
-  pinMode(signalA, INPUT);
-  pinMode(signalB, INPUT);
-  attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
-  */
-
-  delay(1000);
-}
-
-void loop() {
-  if (Serial.available()) {
-    char chr = Serial.read();
-    switch (chr) {
-      case 'w':
-        // esempio: vai avanti
-        // foward(120);
-        break;
-    }
-  }
-}
-
 #pragma region UTILITY
 
 void TCA9548A(uint8_t bus){
   Wire.beginTransmission(0x70);
   Wire.write(1 << bus);
   Wire.endTransmission();
+  delay(2);
 }
 
 #pragma endregion
 
 #pragma region GIROSCOPIO
 
-void iniziaGyro() {
+bool iniziaGyro(uint8_t ch) {
+  bool iniz = true;
+  TCA9548A(ch);
   if (!bno.begin()) {
-    Serial.print("Problema: BNO055");
-    while (1);
+    Serial.print("Problema: BNO055 ");
+    Serial.println(ch);
+    iniz = false;
   }
-
+  return iniz;
 }
 
+void leggiGyro(uint8_t ch, float* yaw, float* pitch, float* roll) {
+  TCA9548A(ch);
+  sensors_event_t orient, accel;
+  bno.getEvent(&orient, Adafruit_BNO055::VECTOR_EULER);
+  if (yaw)   *yaw   = orient.orientation.x;
+  if (pitch) *pitch = orient.orientation.y;
+  if (roll)  *roll  = orient.orientation.z;
+}
+
+// (lasciate le tue helper, se vuoi usarle con un event già letto)
 double getX(sensors_event_t* event) {
-  double x= -1;
+  double x = -1;
   if (event->type == SENSOR_TYPE_ORIENTATION) {
     x = event->orientation.x;
   }
   return x;
 }
-
 double getY(sensors_event_t* event) {
-  double y= -1;
+  double y = -1;
   if (event->type == SENSOR_TYPE_ORIENTATION) {
     y = event->orientation.y;
   }
   return y;
 }
-
 double getZ(sensors_event_t* event) {
-  double z= -1;
+  double z = -1;
   if (event->type == SENSOR_TYPE_ORIENTATION) {
     z = event->orientation.z;
   }
@@ -145,79 +111,123 @@ double getZ(sensors_event_t* event) {
 
 #pragma endregion
 
-#pragma region TOF
+#pragma region TOF_CORTO
 
-void iniziaToF() {
+bool iniziaToFCorto(uint8_t ch) {
+  bool iniz = true;
+  TCA9548A(ch);
   if (!vl.begin()) {
-    Serial.println(F("Problema: VL6180X"));
-    while (1) delay(10); 
-    
+    Serial.print(F("Problema: VL6180X "));
+    Serial.println(ch);
+    iniz = false;
   }
+  return iniz;
 }
 
-double leggiTof() {
-  uint8_t status;
-  double range = vl.readRange();
-  isMuro = (range <= 100);
-  if (status >= VL6180X_ERROR_SYSERR_1 && status <= VL6180X_ERROR_SYSERR_5) {
-    // da controlare il print
-    Serial.println(status);
-    range= -1;
+double leggiTofCorto(uint8_t ch, uint8_t* outStatus = nullptr) {
+  TCA9548A(ch);
+
+  double ris = -1.0;
+  uint8_t range = vl.readRange();
+  uint8_t status = vl.readRangeStatus();
+
+  if (outStatus) {
+    *outStatus = status;
   }
-  return range;
+  if (status == VL6180X_ERROR_NONE) {
+    ris = range / 10.0;           // cm
+    isMuro = (ris <= 10.0);       // soglia 10 cm
+  } else {
+    isMuro = false;
+  }
+  return ris;
 }
 
 #pragma endregion
 
 #pragma region TOF_LONG
 
-void iniziaTOF_LONG() {
+bool iniziaToFLong(uint8_t ch) {
+  bool iniz = true;
+  TCA9548A(ch);
   if (!lox.begin()) {
-    Serial.println(F("Problema: VL53L0X"));
-    while (1) delay(10);
+    Serial.print(F("Problema: VL53L0X "));
+    Serial.println(ch);
+    iniz = false;
   }
+  return iniz;
 }
 
-double readTOF_LONG() {
-  double var;
-  VL53L0X_RangingMeasurementData_t measure;
-  lox.rangingTest(&measure, false);   // true per debug
+double leggiTofLong(uint8_t ch, uint8_t* outStatus = nullptr) {
+  TCA9548A(ch);
 
-  if (measure.RangeStatus != 4) {     // 4 = out of range/phase error
-    var = measure.RangeMilliMeter;
-  } else {
-    var = -1;
+  double ris = -1.0;
+  VL53L0X_RangingMeasurementData_t m;
+  lox.rangingTest(&m, false);
+
+  uint8_t status = m.RangeStatus;
+  if (outStatus) {
+    *outStatus = status;
   }
-  return var;
+  if (status != 4) {
+    ris = m.RangeMilliMeter / 10.0; // cm
+  }
+  return ris;
 }
 
 #pragma endregion
 
 #pragma region COLOR_SENSOR
 
-void iniziaColorSensor() {
+bool iniziaColore(uint8_t ch) {
+  bool iniz = true;
+  TCA9548A(ch);
   if (!tcs.begin()) {
-    Serial.println("Problema: Colore");
-    while (1) delay(10);
+    Serial.print("Problema: TCS34725 ");
+    Serial.println(ch);
+    iniz = false;
   }
+  return iniz;
 }
 
-char readColorSensor() {
-  uint16_t r, g, b, c;
-  char colore = 'n';
-  tcs.getRawData(&r, &g, &b, &c);
+// ritorna 'r','v','b','n' ; outStatus: 0 ok, 1 errore/nero (tutti 0)
+char leggiColore(uint8_t ch, uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* outStatus = nullptr) {
+  TCA9548A(ch);
 
-  if (r > g && r > b) {
-    colore = 'r';
-  } else if (g > r && g > b) {
-    colore = 'g';
-  } else if (b > r && b > g) {
-    colore = 'b';
+  uint16_t rr = 0;
+  uint16_t gg = 0;
+  uint16_t bb = 0;
+  uint16_t cc = 0;
+
+  tcs.getRawData(&rr, &gg, &bb, &cc);
+
+  uint8_t st = 0;
+  if (rr == 0 && gg == 0 && bb == 0 && cc == 0) {
+    st = 1;
   } else {
-    // Nessun colore dominante
-    colore = 'x';
+    st = 0;
   }
-  return colore;
+
+  char dom = 'n';
+  if (st == 0) {
+    if (rr > gg && rr > bb) {
+      dom = 'r';
+    } else if (gg > rr && gg > bb) {
+      dom = 'v';
+    } else if (bb > rr && bb > gg) {
+      dom = 'b';
+    } else {
+      dom = 'n';
+    }
+  }
+
+  if (outStatus) *outStatus = st;
+  if (r) *r = rr;
+  if (g) *g = gg;
+  if (b) *b = bb;
+  if (c) *c = cc;
+
+  return dom;
 }
 
 #pragma endregion
@@ -226,7 +236,11 @@ char readColorSensor() {
 
 void encoderReading() {
   int B = digitalRead(signalB);
-  tickCount += (B == 1) ? -1 : +1;
+  if (B == 1) {
+    tickCount -= 1;
+  } else {
+    tickCount += 1;
+  }
 }
 
 void go(int parCmGoal) {
@@ -266,3 +280,101 @@ void turnLeft(int parVel) {
 }
 
 #pragma endregion
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  while (!Serial) delay(10);
+
+  // Inizializza sensori sui rispettivi canali
+  iniziaGyro(0);
+  iniziaToFCorto(1);
+  iniziaColore(2);
+  iniziaToFLong(3);
+  iniziaToFCorto(4);
+  iniziaColore(5);
+  iniziaToFLong(6);
+
+  // encoder (lasciati come nel tuo modello)
+/*
+  pinMode(dirDx, OUTPUT);
+  pinMode(dirSx, OUTPUT);
+  pinMode(velDx, OUTPUT);
+  pinMode(velSx, OUTPUT);
+
+  pinMode(signalA, INPUT);
+  pinMode(signalB, INPUT);
+  attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
+*/
+
+  delay(1000);
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    int b = Serial.read();
+    int cmd= b - '0'; // converte il char digitato in numero
+    switch (cmd) {
+      case 0: { // gyro
+        float yaw = 0.0;
+        float pitch = 0.0;
+        float roll = 0.0;
+        leggiGyro(0, &yaw, &pitch, &roll);
+        Serial.print(yaw, 2); Serial.print(' ');
+        Serial.print(pitch, 2); Serial.print(' ');
+        Serial.println(roll, 2);
+        Serial.println();
+        break;
+      }
+      case 1: { // tof corto ch1
+        uint8_t s;
+        double d = leggiTofCorto(1, &s);
+        Serial.println(d, 2);
+        Serial.println();
+        break;
+      }
+      case 2: { // colore ch2
+        uint16_t r, g, b, c;
+        uint8_t s;
+        char dom = leggiColore(2, &r, &g, &b, &c, &s);
+        Serial.println(dom);
+        Serial.println();
+        break;
+      }
+      case 3: { // tof lungo ch3
+        uint8_t s;
+        double d = leggiTofLong(3, &s);
+        Serial.println(d, 2);
+        Serial.println();
+        break;
+      }
+      case 4: { // tof corto ch4
+        uint8_t s;
+        double d = leggiTofCorto(4, &s);
+        Serial.println(d, 2);
+        Serial.println();
+        break;
+      }
+      case 5: { // colore ch5
+        uint16_t r, g, b, c;
+        uint8_t s;
+        char dom = leggiColore(5, &r, &g, &b, &c, &s);
+        Serial.println(dom);
+        Serial.println();
+        break;
+      }
+      case 6: { // tof lungo ch6
+        uint8_t s;
+        double d = leggiTofLong(6, &s);
+        Serial.println(d, 2);
+        Serial.println();
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
+  delay(100);
+}
