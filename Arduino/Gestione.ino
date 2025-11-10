@@ -20,7 +20,23 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 #pragma endregion
 
 #pragma region VARIABILI_GLOBALI
+// Motore A (sx)
+#define PWMA 3
+#define AIN1 4
+#define AIN2 5
 
+// Motore B (dx)
+#define PWMB 6
+#define BIN1 7
+#define BIN2 8
+
+int vel = 200; 
+
+uint8_t idx = 0;
+uint8_t val_idx = 0;
+char value[4] = "000"; // holds received angle string (e.g., "090")
+int val, cmTarget, tickTarget, encoder1Count;
+char move;
 bool isMuro = false;
 volatile long tickCount = 0;
 
@@ -48,8 +64,8 @@ volatile long tickCount = 0;
 
 #pragma region PIN_ENCODERS
 
-#define signalA 2
-#define signalB 3
+#define signalA 19
+#define signalB 18
 
 #pragma endregion
 
@@ -241,51 +257,65 @@ void encoderReading() {
   } else {
     tickCount += 1;
   }
+  Serial.println(tickCount);
+}
+// delay
+const unsigned long DUR_AVANTI_MS   = 3600;
+const unsigned long DUR_INDIETRO_MS = 3600;
+const unsigned long DUR_TURN_MS     = 3400;
+
+void stopMotori() {
+  analogWrite(PWMA, 0);
+  analogWrite(PWMB, 0);
 }
 
-void go(int parCmGoal) {
-  tickCount = 0;
-  int targetTick = (488 /*forse*/ * parCmGoal) / 22;
-  foward(100);
-  while (abs(tickCount) < targetTick) {
-    // waits
-  }
-  stopMotors();
+void avanti() {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMA, vel);
+  analogWrite(PWMB, vel);
 }
 
-void foward(int parVel) {
-  digitalWrite(dirDx, HIGH);
-  digitalWrite(dirSx, HIGH);
-  analogWrite(velDx, parVel);
-  analogWrite(velSx, parVel);
+void indietro() {
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  digitalWrite(BIN1, LOW);
+  digitalWrite(BIN2, HIGH);
+  analogWrite(PWMA, vel);
+  analogWrite(PWMB, vel);
 }
 
-void stopMotors() {
-  analogWrite(velDx, 0);
-  analogWrite(velSx, 0);
+void sinistra() {
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMA, vel);
+  analogWrite(PWMB, vel);
 }
 
-void turnRight(int parVel) {
-  digitalWrite(dirDx, LOW);
-  digitalWrite(dirSx, HIGH);
-  analogWrite(velDx, parVel);
-  analogWrite(velSx, parVel);
+void destra() {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
+  digitalWrite(BIN1, LOW);
+  digitalWrite(BIN2, HIGH);
+  analogWrite(PWMA, vel);
+  analogWrite(PWMB, vel);
 }
-
-void turnLeft(int parVel) {
-  digitalWrite(dirDx, HIGH);
-  digitalWrite(dirSx, LOW);
-  analogWrite(velDx, parVel);
-  analogWrite(velSx, parVel);
-}
-
 #pragma endregion
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   while (!Serial) delay(10);
-
+  pinMode(PWMA, OUTPUT);
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
   // Inizializza sensori sui rispettivi canali
   iniziaGyro(0);
   iniziaToFCorto(1);
@@ -295,8 +325,8 @@ void setup() {
   iniziaColore(5);
   iniziaToFLong(6);
 
-  // encoder (lasciati come nel tuo modello)
-/*
+  // encoder 
+
   pinMode(dirDx, OUTPUT);
   pinMode(dirSx, OUTPUT);
   pinMode(velDx, OUTPUT);
@@ -305,76 +335,198 @@ void setup() {
   pinMode(signalA, INPUT);
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
-*/
+
 
   delay(1000);
+
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    int b = Serial.read();
-    int cmd= b - '0'; // converte il char digitato in numero
-    switch (cmd) {
-      case 0: { // gyro
-        float yaw = 0.0;
-        float pitch = 0.0;
-        float roll = 0.0;
-        leggiGyro(0, &yaw, &pitch, &roll);
-        Serial.print(yaw, 2); Serial.print(' ');
-        Serial.print(pitch, 2); Serial.print(' ');
-        Serial.println(roll, 2);
-        Serial.println();
-        break;
+  
+  if (Serial.available())
+  {
+    char chr = Serial.read();
+    if(chr == 'g'){ // Orientation read
+      idx = 10;
+      val_idx=0;
+
+      Serial.print("Yaw:");
+
+      
+    }
+    if(chr == 'w') // Movement command
+    {
+      idx = 8;
+      move=chr;
+      val_idx = 0;
+    } else if(chr == 'k'){
+      idx = -1;
+      val_idx = 0;
+    }
+     else if(chr == 'l'){
+      idx = -1;
+      val_idx = 0;
+    }
+    else if(chr == 'W') //avanti forte
+    {
+      idx = 8;
+      move=chr;
+      val_idx = 0;
+    }
+    else if(chr == 's') //indietro piano
+    {
+      idx = 8;
+      move=chr;
+      val_idx = 0;
+    }
+    else if(chr == 'S')//indietro forte
+    {
+      idx =8;
+      move=chr;
+      val_idx = 0;
+    }
+    // Joint controls
+    // base motor
+    else if(chr == 'b')
+    {
+      idx = 0;
+      val_idx = 0;
+    }
+    // shoulder motor
+    else if(chr == 'v')
+    {
+      idx = 1;
+      val_idx = 0;
+    }
+    // GOMITO motor
+    else if(chr == 'c')
+    {
+      idx = 2;
+      val_idx = 0;
+    }
+    // POLSO motor
+    else if(chr == 'x')
+    {
+      idx = 3;
+      val_idx = 0;
+    }
+    
+    // MANO motor
+    else if(chr == 'z')
+    {
+      idx = 4;
+      val_idx = 0;
+    }
+    else if(chr == 'f')
+    {
+      idx = 7;
+      val_idx = 0;
+    }
+    
+    else if(chr == 'a')
+    {
+      idx = 5;
+      val_idx = 0;
+    }
+
+    else if(chr == 'd')
+    {
+      idx = 6;
+      val_idx = 0;
+    }
+    
+    // Separator
+    else if(chr == ',') {
+      Serial.println(value);
+      val = atoi(value); // Convert received number string to int
+      
+      Serial.flush();
+      if(idx == 8)
+      {
+        switch(move){ // Movement based on selected command (forward/backward)
+          case 'w':
+            cmTarget=val;
+            Serial.println("qwertyuio");
+            Serial.println(val);
+            tickTarget = 700 * cmTarget / 22;
+            tickCount=0;
+            Serial.println(tickTarget);
+            avanti();
+            while (true) {
+              if (tickTarget < abs(tickCount)) {
+              
+                stopMotori();
+                tickCount=0;
+                break;
+              }
+            }
+            break;
+          case 's':
+            cmTarget=val;
+            tickTarget = 700 * cmTarget / 22;
+            indietro();
+            tickCount=0;
+            while (true) {
+              if (tickTarget < abs(tickCount)) {
+                stopMotori();
+                tickCount=0;
+                break;
+              }
+            }
+            break;      
+        }       
+      Serial.print("Yaw:");
       }
-      case 1: { // tof corto ch1
-        uint8_t s;
-        double d = leggiTofCorto(1, &s);
-        Serial.println(d, 2);
-        Serial.println();
-        break;
+      // Process joint movement
+      else if(idx == 0)
+      {
+        val = map(val, 0, 180, 180, 0);
       }
-      case 2: { // colore ch2
-        uint16_t r, g, b, c;
-        uint8_t s;
-        char dom = leggiColore(2, &r, &g, &b, &c, &s);
-        Serial.println(dom);
-        Serial.println();
-        break;
+      else if(idx == 1)
+      {
       }
-      case 3: { // tof lungo ch3
-        uint8_t s;
-        double d = leggiTofLong(3, &s);
-        Serial.println(d, 2);
-        Serial.println();
-        break;
+      else if(idx == 2)
+      { 
+         val = map(val, 0, 180, 20, 157);
       }
-      case 4: { // tof corto ch4
-        uint8_t s;
-        double d = leggiTofCorto(4, &s);
-        Serial.println(d, 2);
-        Serial.println();
-        break;
+      else if(idx == 3)
+      { 
+            }
+      else if(idx == 4)
+      {
+         }
+      else if(idx == 7)
+      { 
       }
-      case 5: { // colore ch5
-        uint16_t r, g, b, c;
-        uint8_t s;
-        char dom = leggiColore(5, &r, &g, &b, &c, &s);
-        Serial.println(dom);
-        Serial.println();
-        break;
+    
+      else if(idx == 5)
+      { 
+       sinistra();
+      Serial.print("Yaw:");
+      
       }
-      case 6: { // tof lungo ch6
-        uint8_t s;
-        double d = leggiTofLong(6, &s);
-        Serial.println(d, 2);
-        Serial.println();
-        break;
+      else if(idx == 6)
+      {
+       
+       destra();
+       
+        Serial.print("Yaw:");
+        
       }
-      default: {
-        break;
-      }
+      // reset the angle
+      value[0] = '0';
+      value[1] = '0';
+      value[2] = '0';
+      value[3] = '\0';
+    }
+    else // Store digits into value array
+    {
+      Serial.println(chr);
+      value[val_idx] = chr;
+      val_idx++;
     }
   }
+  
 
   delay(100);
 }
