@@ -1,3 +1,4 @@
+
 #pragma region LIBRERIE
 
 #include <Wire.h>
@@ -39,6 +40,7 @@ int val, cmTarget, tickTarget, encoder1Count;
 char move;
 bool isMuro = false;
 volatile long tickCount = 0;
+bool isInvertito = false;
 
 #pragma endregion
 
@@ -52,6 +54,15 @@ volatile long tickCount = 0;
   5 -> Colore (TCS34725)
   6 -> ToF long (VL53L0X)
 */
+
+int CANALE_GYRO = 0;
+int CANALE_TOF_1 = 1; //tof corto
+int CANALE_COLORE_1 = 2;
+int CANALE_TOF_2 = 3; //tof lungo
+int CANALE_TOF_3 = 4; //tof corto
+int CANALE_COLORE_2 = 5;
+int CANALE_TOF_4 = 6; //tof lungo
+
 
 #pragma region PIN_MOTORI
 
@@ -346,13 +357,12 @@ void loop() {
   if (Serial.available())
   {
     char chr = Serial.read();
+    Serial.print("True");
     if(chr == 'g'){ // Orientation read
       idx = 10;
       val_idx=0;
 
       Serial.print("Yaw:");
-
-      
     }
     if(chr == 'w') // Movement command
     {
@@ -446,15 +456,15 @@ void loop() {
         switch(move){ // Movement based on selected command (forward/backward)
           case 'w':
             cmTarget=val;
-            Serial.println("qwertyuio");
-            Serial.println(val);
             tickTarget = 700 * cmTarget / 22;
             tickCount=0;
-            Serial.println(tickTarget);
-            avanti();
+            if(!isInvertito){
+              avanti();
+            }else{
+              indietro();
+            }
             while (true) {
               if (tickTarget < abs(tickCount)) {
-              
                 stopMotori();
                 tickCount=0;
                 break;
@@ -464,7 +474,11 @@ void loop() {
           case 's':
             cmTarget=val;
             tickTarget = 700 * cmTarget / 22;
-            indietro();
+            if(!isInvertito){
+              indietro();
+            }else{
+              avanti();
+            }
             tickCount=0;
             while (true) {
               if (tickTarget < abs(tickCount)) {
@@ -478,27 +492,41 @@ void loop() {
       Serial.print("Yaw:");
       }
       // Process joint movement
-      else if(idx == 0)
-      {
-        val = map(val, 0, 180, 180, 0);
+      else if(idx == 0) { //lettura dei colori DA PROVARE 
+        if(val == 1){
+          Serial.print("qwertyuiop");
+          Serial.print(leggiColore(CANALE_COLORE_1, &r, &g, &b, &c, &s));
+        }else{
+          Serial.print("zxcvbnm");
+          Serial.print(leggiColore(CANALE_COLORE_2, &r, &g, &b, &c, &s));
+        }
       }
-      else if(idx == 1)
-      {
+      else if(idx == 1){ //lettura Tof DA PROVARE
+        if(val == 1){
+          Serial.print(leggiTofCorto(CANALE_TOF_1, &s));
+        }else if(val == 2){
+          Serial.print(leggiTofLong(CANALE_TOF_2, &s));
+        }else if(val == 3){
+         Serial.print(leggiTofCorto(CANELE_TOF_3, &s));
+        } else{
+          Serial.print(leggiTofLong(CANALE_TOF_4, &s));
+        } 
+      }else if(idx == 2){
+        isInvertito = !isInvertito;
+        int temp;
+        //scambio sensori colore
+        temp = CANALE_COLORE_1;
+        CANALE_COLORE_1 = CANALE_COLORE_2;
+        CANALE_COLORE_2 = temp;
+        //scambio tof corti
+        temp = CANALE_TOF_1;
+        CANALE_TOF_1 = CANALE_TOF_3;
+        CANALE_TOF_3 = temp;
+        //scambio tof lunghi
+        temp = CANALE_TOF_2;
+        CANALE_TOF_2 = CANALE_TOF_4;
+        CANALE_TOF_4 = temp;
       }
-      else if(idx == 2)
-      { 
-         val = map(val, 0, 180, 20, 157);
-      }
-      else if(idx == 3)
-      { 
-            }
-      else if(idx == 4)
-      {
-         }
-      else if(idx == 7)
-      { 
-      }
-    
       else if(idx == 5)
       { 
        sinistra();
