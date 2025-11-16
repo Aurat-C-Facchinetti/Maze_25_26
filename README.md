@@ -30,6 +30,9 @@ verrò utilizzato un terzo parametro per retrocompatibiltà con codice già esis
   - conferma comando ricevuto per una sincronizzazione (restituisco il comando che ha ricevuto) **(voglaimo che ci risponda con l'esatto comando che abbiamo inviato)**
   - colore della piastrella preferibilemente un carattere **(vogliamo che ci restituisca un carattere)**
     
-
+# COSA FA QUANDO FA 30CM
+si ferma, manda 1 in caso fosse tutto nella norma, manda 0 se si è duvuto tornare indietro.
+se 1: fa un controllo delle lettere e py manda c, per sapere che colore ha sotto, se è blu deve aspettare e far lampeggiare un led, mentre lo fa si fa tutti i suoi calcoli. Manda m1, m2, m3, m4, per i tof. Infine l'inclinazione del gyro
+se 0: py aspetta il motivo o il paraurti oppure una casella nera, se è una casella nera ino manderà 1, altrimenti 0;
   
 
