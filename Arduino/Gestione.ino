@@ -8,12 +8,14 @@
 #include <Adafruit_VL53L0X.h>
 #include <Adafruit_VL6180X.h>
 #include <Adafruit_TCS34725.h>
+#include <math.h>
 
 #pragma endregion
 
 #pragma region COSTRUTTORI
 
-Adafruit_BNO055   bno = Adafruit_BNO055(55, 0x29, &Wire);
+//Adafruit_BNO055   bno = Adafruit_BNO055(55, 0x29, &Wire);
+Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
 Adafruit_VL6180X  vl;
 Adafruit_VL53L0X  lox;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
@@ -41,6 +43,7 @@ char move;
 bool isMuro = false;
 volatile long tickCount = 0;
 bool isInvertito = false;
+float gyroValues[3] = {0.0, 0.0, 0.0};
 
 #pragma endregion
 
@@ -138,9 +141,75 @@ double getZ(sensors_event_t* event) {
 
 #pragma endregion
 
+#pragma region GIROSCOPIO_UPDATED
+
+imu::Quaternion q0;
+bool riferimentoImpostato = false;
+
+static inline float rad2deg(float r) { return r * 180.0f / M_PI; }
+static inline float clamp01(float v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);} 
+
+void inziaGyro2() {
+  if (!bno.begin()) {
+    Serial.print("Problema: BNO055 ");
+  }
+  delay(1000);
+  bno.setExtCrystalUse(true);
+  riferimentoImpostato = false;
+}
+void leggiGyro2() {
+  // Leggi quaternione attuale
+  imu::Quaternion q = bno.getQuat();
+
+  // Alla prima chiamata: salva come riferimento e basta
+  if (!riferimentoImpostato) {
+    q0 = q;
+    riferimentoImpostato = true;
+  }
+
+  // Rotazione relativa: q_rel = inv(q0)*q = conj(q0)*q
+  imu::Quaternion q_rel = q0.conjugate() * q;
+
+  float w = q_rel.w();
+  float x = q_rel.x();
+  float y = q_rel.y();
+  float z = q_rel.z();
+
+  // roll (X)
+  float roll = rad2deg(atan2f(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y * y)));
+  // pitch (Y)
+  float s = 2.0f * (w * y - z * x);
+  s = clamp01(s);
+  float pitch = rad2deg(asinf(s));
+  // yaw / heading (Z)
+  float heading = rad2deg(atan2f(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z)));
+
+  // Normalizza heading a [-180, 180]
+  if (heading < -180.0f) heading += 360.0f;
+  if (heading >  180.0f) heading -= 360.0f;
+
+  gyroValues[0] = heading;
+  gyroValues[1] = roll;
+  gyroValues[2] = pitch;
+}
+
+float getX() {
+  return gyroValues[0];  // primo elemento
+}
+
+float getY() {
+  return gyroValues[1];  // secondo elemento
+}
+
+float getZ() {
+  return gyroValues[2];  // terzo elemento
+}
+
+
+#pragma endregion
 #pragma region TOF_CORTO
 
-bool iniziaToFCorto(uint8_t ch) {
+bool iniziaToFCorto(uint8_t ch) {//NEL CASO NON FUNZIONA CAMBIA CON L'ALTRO CODICE
   bool iniz = true;
   TCA9548A(ch);
   if (!vl.begin()) {
@@ -174,7 +243,7 @@ double leggiTofCorto(uint8_t ch, uint8_t* outStatus = nullptr) {
 
 #pragma region TOF_LONG
 
-bool iniziaToFLong(uint8_t ch) {
+bool iniziaToFLong(uint8_t ch) {//STESSA COSA DEL COMMENTO ANTECEDENTE
   bool iniz = true;
   TCA9548A(ch);
   if (!lox.begin()) {
@@ -206,7 +275,7 @@ double leggiTofLong(uint8_t ch, uint8_t* outStatus = nullptr) {
 
 #pragma region COLOR_SENSOR
 
-bool iniziaColore(uint8_t ch) {
+bool iniziaColore(uint8_t ch) {//NEL CASO CAMBIA IN VOID
   bool iniz = true;
   TCA9548A(ch);
   if (!tcs.begin()) {
@@ -259,7 +328,7 @@ char leggiColore(uint8_t ch, uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c,
 
 #pragma endregion
 
-#pragma region OLD
+#pragma region MOTORI
 
 void encoderReading() {
   int B = digitalRead(signalB);
@@ -315,6 +384,43 @@ void destra() {
   analogWrite(PWMA, vel);
   analogWrite(PWMB, vel);
 }
+void ruotaRelativa(int gradi, bool versoSinistra) {
+  float start  = getX(); //x di ora
+  // x di dove deve arrivare
+  float target;
+  if (versoSinistra) {
+    target = start + gradi;
+  } else {
+    target = start - gradi;
+  }
+
+  if (target >  180.0f) target -= 360.0f;
+  if (target < -180.0f) target += 360.0f;
+
+  if (versoSinistra) {
+    sinistra();
+  }
+  else{
+    destra();
+  }
+  while (true) {
+    leggiGyro2(); // aggiorna il gyro
+    float current = getX();
+
+    // errore angolare
+    float err = target - current;
+    if (err >  180.0f) err -= 360.0f;
+    if (err < -180.0f) err += 360.0f;
+
+    if (versoSinistra) {
+      if (err <= 0.0f) break;
+    } else {
+      if (err >= 0.0f) break;
+    }
+  }
+  stopMotori();
+}
+
 #pragma endregion
 
 void setup() {
@@ -328,7 +434,8 @@ void setup() {
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
   // Inizializza sensori sui rispettivi canali
-  iniziaGyro(0);
+  //iniziaGyro(0);
+  inziaGyro2();
   iniziaToFCorto(1);
   iniziaColore(2);
   iniziaToFLong(3);
@@ -361,8 +468,10 @@ void loop() {
     if(chr == 'g'){ // Orientation read
       idx = 10;
       val_idx=0;
-
-      Serial.print("Yaw:");
+      leggiGyro2();
+      Serial.println(getX());
+      Serial.println(getY());
+      Serial.println(getZ());
     }
     if(chr == 'w') // Movement command
     {
@@ -373,58 +482,10 @@ void loop() {
       idx = -1;
       val_idx = 0;
     }
-     else if(chr == 'l'){
-      idx = -1;
-      val_idx = 0;
-    }
-    else if(chr == 'W') //avanti forte
+    else if(chr == 's') //indietro 
     {
       idx = 8;
       move=chr;
-      val_idx = 0;
-    }
-    else if(chr == 's') //indietro piano
-    {
-      idx = 8;
-      move=chr;
-      val_idx = 0;
-    }
-    else if(chr == 'S')//indietro forte
-    {
-      idx =8;
-      move=chr;
-      val_idx = 0;
-    }
-    // Joint controls
-    // base motor
-    else if(chr == 'b')
-    {
-      idx = 0;
-      val_idx = 0;
-    }
-    // shoulder motor
-    else if(chr == 'v')
-    {
-      idx = 1;
-      val_idx = 0;
-    }
-    // GOMITO motor
-    else if(chr == 'c')
-    {
-      idx = 2;
-      val_idx = 0;
-    }
-    // POLSO motor
-    else if(chr == 'x')
-    {
-      idx = 3;
-      val_idx = 0;
-    }
-    
-    // MANO motor
-    else if(chr == 'z')
-    {
-      idx = 4;
       val_idx = 0;
     }
     else if(chr == 'f')
@@ -464,11 +525,34 @@ void loop() {
               indietro();
             }
             while (true) {
-              if (tickTarget < abs(tickCount)) {
+              if (abs(tickCount) >= tickTarget) {
                 stopMotori();
-                tickCount=0;
+                tickCount = 0;
                 break;
-              }
+              } 
+              // TORNA INDIETRO
+               else {
+                // leggi colore
+                char colore = leggiColore(2, 0, 0, 0, 0);
+
+                if (colore == 'n') {
+                  long tickAndata = abs(tickCount);  // cm percorsi
+                  stopMotori();
+                  delay(50);
+
+                  tickTarget = tickAndata;
+                  tickCount= 0;
+                  if(!isInvertito){
+                    indietro();
+                  }else{
+                    avanti();
+                  }
+                  while (abs(tickCount) < tickTarget)
+                  stopMotori();
+                  tickCount = 0;
+                  break;
+                }
+              } 
             }
             break;
           case 's':
@@ -489,10 +573,10 @@ void loop() {
             }
             break;      
         }       
-      Serial.print("Yaw:");
       }
-      // Process joint movement
       else if(idx == 0) { //lettura dei colori DA PROVARE 
+        uint16_t r, g, b, c;
+        uint8_t s;
         if(val == 1){
           Serial.print("qwertyuiop");
           Serial.print(leggiColore(CANALE_COLORE_1, &r, &g, &b, &c, &s));
@@ -502,12 +586,13 @@ void loop() {
         }
       }
       else if(idx == 1){ //lettura Tof DA PROVARE
+        uint8_t s;
         if(val == 1){
           Serial.print(leggiTofCorto(CANALE_TOF_1, &s));
         }else if(val == 2){
           Serial.print(leggiTofLong(CANALE_TOF_2, &s));
         }else if(val == 3){
-         Serial.print(leggiTofCorto(CANELE_TOF_3, &s));
+         Serial.print(leggiTofCorto(CANALE_TOF_3, &s));
         } else{
           Serial.print(leggiTofLong(CANALE_TOF_4, &s));
         } 
@@ -527,19 +612,13 @@ void loop() {
         CANALE_TOF_2 = CANALE_TOF_4;
         CANALE_TOF_4 = temp;
       }
-      else if(idx == 5)
+      else if(idx == 5)//SINISTRA
       { 
-       sinistra();
-      Serial.print("Yaw:");
-      
+        ruotaRelativa(val, true);
       }
       else if(idx == 6)
       {
-       
-       destra();
-       
-        Serial.print("Yaw:");
-        
+        ruotaRelativa(val, false);//DESTRA
       }
       // reset the angle
       value[0] = '0';
@@ -549,7 +628,6 @@ void loop() {
     }
     else // Store digits into value array
     {
-      Serial.println(chr);
       value[val_idx] = chr;
       val_idx++;
     }
