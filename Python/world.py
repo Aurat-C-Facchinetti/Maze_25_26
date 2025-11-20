@@ -1,7 +1,14 @@
 from imps import *
+from serial_functions import *
+from settings import *
+
+
 
 class World:
+    ser = None
+
     def __init__(self, rows=INIT_ROWS, cols=INIT_COLS):
+
         # matrice logica
         self.visited = np.zeros((rows, cols), dtype=np.uint8)
         # walls bitmask per N,E,S,W = 1,2,4,8
@@ -21,6 +28,7 @@ class World:
         self.visit_current()
         # raddoppia subito la matrice per più spazio iniziale
         self.expand_double()
+
 
     # ---------- util direzione ----------
     """
@@ -44,6 +52,12 @@ class World:
     @staticmethod
     def opposite_dir(idx):
         return (idx + 2) % 4
+
+    def check_command(self):
+        recived_command = "False"
+        while recived_command != "True":
+            recived_command = self.ser.readline().decode('utf-8').rstrip()
+            print(recived_command)
 
     """
         Heads towards the delta (how much we have to move)
@@ -74,16 +88,22 @@ class World:
     def rotate_left(self):
         self.deg -= 90
         self.normalize_deg()
+        self.ser.write(b'a090,')
 
     "Function to rotate right"
     def rotate_right(self):
         self.deg += 90
         self.normalize_deg()
+        self.ser.write(b'd090,')
+
 
     "Function to flip direction: used when we will be stuck"
     def flip_direction(self):
         self.deg += 180
         self.normalize_deg()
+        self.ser.write(b's,')
+        self.check_command()
+
 
     "Function to visit the current cell flagging the cell as visited"
     def visit_current(self):
@@ -200,6 +220,8 @@ class World:
             return False
         moved = (nx != self.x) or (ny != self.y)
         if moved:
+            self.ser.write(b'w030,')
+            self.check_command()
             self.x, self.y = nx, ny
             self.visit_current()
         return moved
