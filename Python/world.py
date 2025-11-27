@@ -1,5 +1,4 @@
 from imps import *
-from serial_functions import *
 from settings import *
 
 
@@ -58,6 +57,8 @@ class World:
         while recived_command != "True":
             recived_command = self.ser.readline().decode('utf-8').rstrip()
             print(recived_command)
+            return True
+        return False
 
     """
         Heads towards the delta (how much we have to move)
@@ -197,6 +198,15 @@ class World:
             self.set_wall_absolute(self.x, self.y, abs_idx, 1)
             self.set_wall_absolute(nx, ny, self.opposite_dir(abs_idx), 1)
         self.visit_current()
+        
+    #par_tof is the tof we want to read 
+    def get_walls(self, par_tof):
+        self.ser.write(b''+ par_tof, ) #TODO magari non va un cabby
+        if self.check_command():
+            is_wall = -1
+            while is_wall == -1:
+                is_wall = int(self.ser.readline().decode('utf-8').rstrip())
+                self.set_wall_relative(is_wall, toggle=False)
 
     """
         1. Checks if there is a wall in the direction where the player is pointing (forward).
@@ -226,6 +236,7 @@ class World:
             self.visit_current()
         return moved
 
+
     """
         Costo di ingresso nella cella in base allo stato.
         0 (white) -> 1 unexplored
@@ -254,6 +265,16 @@ class World:
             variabile = 2"""
         
         return variabile
+
+    def get_color(self):
+        self.ser.write(b'c',)
+        if self.check_command():
+            color = -1
+            while color == -1:
+                color = int(self.ser.readline().decode('utf-8').rstrip())
+                self.visited[self.y, self.x] = color
+
+
 
     """
         Returns a dictionary with useful info about the cell
@@ -394,16 +415,30 @@ class World:
     def follow_path(self, path, on_step=None, stop_when_home=False):
         
         for (nx, ny) in path:
+            self.get_walls("m001,")
+            time.sleep(0.5)
+            self.get_walls("m002,")
+            time.sleep(0.5)
+            self.get_walls("m003,")
+            time.sleep(0.5)
+            self.get_walls("m004,")            
+
             # orienta verso la prossima cella e prova ad avanzare
             self.face_towards(nx, ny)
-            if not self.forward():
+            has_moved = self.forward()
+            if not has_moved:
                 return False
+            
+            self.get_color()
+
             # pausa e chance di input
             if on_step is not None and on_step():
                 return False
             if stop_when_home and (self.x, self.y) == self.home:
                 return True
         return True
+
+
 
     # ---------- rendering ----------
     """
