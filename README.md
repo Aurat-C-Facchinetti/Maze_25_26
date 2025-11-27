@@ -28,7 +28,12 @@ verrò utilizzato un terzo parametro per retrocompatibiltà con codice già esis
   - gradi del giroscopio sia per l'inclinazione **(vogliamo i gradi non i radianti)**
   - gradi del giroscopio per la rotazione (destra/sinistra) **(vogliamo i gradi non i radianti)**
   - conferma comando ricevuto per una sincronizzazione (restituisco il comando che ha ricevuto) **(voglaimo che ci risponda con l'esatto comando che abbiamo inviato)**
-  - colore della piastrella preferibilemente un carattere **(vogliamo che ci restituisca un carattere)**
+  - colore della piastrella preferibilemente un carattere **(vogliamo che ci restituisca un un numero:
+  -   2 (black)    -> You shall not pass (Not visitable)
+  -   3 (blue)  -> 3  Wait 5 seconds
+  -   4 (green)  -> 3 Uphill / Downhill
+  -   5 (grey)  -> 2 Checkpoint
+  - )**
     
 # COSA FA QUANDO FA 30CM
 si ferma, manda 1 in caso fosse tutto nella norma, manda 0 se si è duvuto tornare indietro.
