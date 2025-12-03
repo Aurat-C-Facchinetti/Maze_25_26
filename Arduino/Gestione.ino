@@ -478,14 +478,15 @@ void loop() {
       idx = 8;
       move=chr;
       val_idx = 0;
-    } else if(chr == 'k'){
-      idx = -1;
+    } else if(chr == 'm'){
+      idx = 1;
       val_idx = 0;
     }
     else if(chr == 's') //indietro 
     {
       idx = 8;
       move=chr;
+      isInvertito = !isInvertito;
       val_idx = 0;
     }
     else if(chr == 'f')
