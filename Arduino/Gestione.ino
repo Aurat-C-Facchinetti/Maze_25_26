@@ -57,6 +57,26 @@ float gyroValues[3] = {0.0, 0.0, 0.0};
   5 -> Colore (TCS34725)
   6 -> ToF long (VL53L0X)
 */
+//Custom I2C Addresses
+uint8_t LOX1_ADDRESS = 0x30;
+uint8_t LOX2_ADDRESS = 0x31;
+uint8_t LOX3_ADDRESS = 0x32;
+uint8_t LOX4_ADDRESS = 0x33;
+//Tof's Shutdown pins 
+int SHT_LOX1 = 7;
+int SHT_LOX2 = 9;
+int SHT_LOX3 = 11;
+int SHT_LOX4 = 13;
+//Sensor objects
+Adafruit_VL6180X lox1;
+Adafruit_VL6180X lox2;
+Adafruit_VL6180X lox3;
+Adafruit_VL6180X lox4;
+Adafruit_VL6180X* tofFrontShort;
+Adafruit_VL6180X* tofBackShort;
+Adafruit_VL6180X* tofLeftShort;
+Adafruit_VL6180X* tofRightShort;
+
 
 int CANALE_GYRO = 0;
 int CANALE_TOF_1 = 1; //tof corto
@@ -209,34 +229,91 @@ float getZ() {
 #pragma endregion
 #pragma region TOF_CORTO
 
-bool iniziaToFCorto(uint8_t ch) {//NEL CASO NON FUNZIONA CAMBIA CON L'ALTRO CODICE
-  bool iniz = true;
-  TCA9548A(ch);
-  if (!vl.begin()) {
-    Serial.print(F("Problema: VL6180X "));
-    Serial.println(ch);
-    iniz = false;
+void iniziaTofCorto(Adafruit_VL6180X &sensor, uint8_t shutPin, uint8_t newAddress) {
+  if (!sensor.begin()) {
+    Serial.print(F("Problema shut TOF: "));
+    Serial.println(shutPin);
   }
-  return iniz;
+  sensor.setAddress(newAddress);
+}
+void aggiornaMappaTof() {
+  if (!isInvertito) {
+    // robot normale
+    tofFrontShort = &lox1;
+    tofBackShort  = &lox3;
+    tofLeftShort  = &lox2;
+    tofRightShort = &lox4;
+  } else {
+    // robot girato: front <-> back, left <-> right
+    tofFrontShort = &lox3;
+    tofBackShort  = &lox1;
+    tofLeftShort  = &lox4;
+    tofRightShort = &lox2;
+  }
+}
+void setIndirizzo() {
+  /*if (isInvertito) {
+        uint8_t temp;
+        temp = LOX1_ADDRESS;
+        LOX1_ADDRESS = LOX3_ADDRESS;
+        LOX3_ADDRESS = temp;
+        //scambio tof lunghi
+        temp = LOX2_ADDRESS;
+        LOX2_ADDRESS = LOX4_ADDRESS;
+        LOX4_ADDRESS = temp;
+
+        Adafruit_VL6180X temp2;
+        temp2 = lox1;
+        lox1 = lox3;
+        lox3 = temp2;
+        temp2 = lox2;
+        lox2 = lox4;
+        lox4 = temp2;
+
+        int temp3;
+        temp3 = SHT_LOX1;
+        SHT_LOX1 = SHT_LOX3;
+        SHT_LOX3 = temp3;
+        temp3=SHT_LOX2;
+        SHT_LOX2 = SHT_LOX4;
+        SHT_LOX4 = temp3;
+  } */
+  // Tutti in reset
+  digitalWrite(SHT_LOX1, LOW);
+  digitalWrite(SHT_LOX2, LOW);
+  digitalWrite(SHT_LOX3, LOW);
+  digitalWrite(SHT_LOX4, LOW);
+  delay(10);
+
+  // Attivo i 4 TOF uno dopo l’altro
+  Adafruit_VL6180X* sensori[4] = { &lox1, &lox2, &lox3, &lox4 };
+  uint8_t shutdown[4] = { SHT_LOX1, SHT_LOX2, SHT_LOX3, SHT_LOX4 };
+  uint8_t indirizzo[4] = { LOX1_ADDRESS, LOX2_ADDRESS, LOX3_ADDRESS, LOX4_ADDRESS };
+
+  for (uint8_t i = 0; i < 4; i++) {
+    if (isInvertito) 
+    {
+      i = (i + 2) % 4;
+    }
+    digitalWrite(shutdown[i], HIGH);
+    delay(1000);
+    iniziaTofCorto(*sensori[i], shutdown[i], indirizzo[i]);
+    delay(1000);
+  }
 }
 
-double leggiTofCorto(uint8_t ch, uint8_t* outStatus = nullptr) {
-  TCA9548A(ch);
-
-  double ris = -1.0;
-  uint8_t range = vl.readRange();
-  uint8_t status = vl.readRangeStatus();
-
-  if (outStatus) {
-    *outStatus = status;
-  }
-  if (status == VL6180X_ERROR_NONE) {
+double leggiTofCorto(Adafruit_VL6180X &sensor) {
+  int range  = sensor.readRange();
+  int status = sensor.readRangeStatus();
+  if (status == VL6180X_ERROR_RANGEOFLOW || status == VL6180X_ERROR_RANGEUFLOW || range > 180 || range == 0) {
+    range = -1;
+    isMuro=false;
+  }else{
+    double ris;
     ris = range / 10.0;           // cm
     isMuro = (ris <= 10.0);       // soglia 10 cm
-  } else {
-    isMuro = false;
   }
-  return ris;
+  return range;
 }
 
 #pragma endregion
@@ -433,15 +510,16 @@ void setup() {
   pinMode(PWMB, OUTPUT);
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
+  pinMode(SHT_LOX1, OUTPUT);
+  pinMode(SHT_LOX2, OUTPUT);
+  pinMode(SHT_LOX3, OUTPUT);
+  pinMode(SHT_LOX4, OUTPUT);
+  setIndirizzo();
   // Inizializza sensori sui rispettivi canali
   //iniziaGyro(0);
   inziaGyro2();
-  iniziaToFCorto(1);
   iniziaColore(2);
-  iniziaToFLong(3);
-  iniziaToFCorto(4);
   iniziaColore(5);
-  iniziaToFLong(6);
 
   // encoder 
 
@@ -464,7 +542,6 @@ void loop() {
   if (Serial.available())
   {
     char chr = Serial.read();
-    Serial.print("True");
     if(chr == 'g'){ // Orientation read
       idx = 10;
       val_idx=0;
@@ -484,9 +561,8 @@ void loop() {
     }
     else if(chr == 's') //indietro 
     {
-      idx = 8;
+      idx = 2;
       move=chr;
-      isInvertito = !isInvertito;
       val_idx = 0;
     }
     else if(chr == 'f')
@@ -509,6 +585,7 @@ void loop() {
     
     // Separator
     else if(chr == ',') {
+    Serial.print("True");
       Serial.println(value);
       val = atoi(value); // Convert received number string to int
       
@@ -589,29 +666,23 @@ void loop() {
       else if(idx == 1){ //lettura Tof DA PROVARE
         uint8_t s;
         if(val == 1){
-          Serial.print(leggiTofCorto(CANALE_TOF_1, &s));
+          Serial.print(leggiTofCorto(*tofFrontShort));
         }else if(val == 2){
-          Serial.print(leggiTofLong(CANALE_TOF_2, &s));
+          Serial.print(leggiTofCorto(*tofBackShort));
         }else if(val == 3){
-         Serial.print(leggiTofCorto(CANALE_TOF_3, &s));
+         Serial.print(leggiTofCorto(*tofLeftShort));
         } else{
-          Serial.print(leggiTofLong(CANALE_TOF_4, &s));
+          Serial.print(leggiTofCorto(*tofRightShort));
         } 
-      }else if(idx == 2){
+      }else if(idx == 2){        
         isInvertito = !isInvertito;
-        int temp;
+        uint8_t temp;
         //scambio sensori colore
         temp = CANALE_COLORE_1;
         CANALE_COLORE_1 = CANALE_COLORE_2;
         CANALE_COLORE_2 = temp;
         //scambio tof corti
-        temp = CANALE_TOF_1;
-        CANALE_TOF_1 = CANALE_TOF_3;
-        CANALE_TOF_3 = temp;
-        //scambio tof lunghi
-        temp = CANALE_TOF_2;
-        CANALE_TOF_2 = CANALE_TOF_4;
-        CANALE_TOF_4 = temp;
+        aggiornaMappaTof();
       }
       else if(idx == 5)//SINISTRA
       { 
