@@ -115,13 +115,13 @@ void TCA9548A(uint8_t bus){
 
 void iniziaGyro() {
   if (!bno.begin()) {
-    Serial.print("Problema: BNO055 (GYRO)");
+    Serial.println("Problema: BNO055 (GYRO)");
   }
   delay(1000);
   bno.setExtCrystalUse(true);
   riferimentoImpostato = false;
 }
-void leggiGyro2() {
+void leggiGyro() {
   // Leggi quaternione attuale
   imu::Quaternion q = bno.getQuat();
 
@@ -244,8 +244,8 @@ bool iniziaColore(uint8_t ch) {//NEL CASO CAMBIA IN VOID
   bool iniz = true;
   TCA9548A(ch);
   if (!tcs.begin()) {
-    Serial.print("Problema: TCS34725 (COLORE)");
-    Serial.println(ch);
+    Serial.println("Problema: TCS34725 (COLORE)");
+    Serial.print(ch);
     iniz = false;
   }
   return iniz;
@@ -403,6 +403,7 @@ void setup() {
   pinMode(SHT_LOX2, OUTPUT);
   pinMode(SHT_LOX3, OUTPUT);
   pinMode(SHT_LOX4, OUTPUT);
+  aggiornaMappaTof();
   setIndirizzo();
   iniziaGyro();
   iniziaColore(2);
@@ -423,7 +424,7 @@ void loop() {
     if(chr == 'g'){ // Orientation read
       idx = 10;
       val_idx=0;
-      leggiGyro2();
+      leggiGyro();
       Serial.println(getX());
       Serial.println(getY());
       Serial.println(getZ());
@@ -462,7 +463,7 @@ void loop() {
     
     // Separator
     else if(chr == ',') {
-      Serial.print("True");
+      Serial.println("True");
       val = atoi(value); // Convert received number string to int
       Serial.flush();
       if(idx == 8)
@@ -519,13 +520,13 @@ void loop() {
       }
       else if(idx == 1){ //lettura Tof
         if(val == 1){
-          Serial.print(leggiTofCorto(*tofFrontShort));
+          Serial.println(leggiTofCorto(*tofFrontShort));
         }else if(val == 2){
-          Serial.print(leggiTofCorto(*tofBackShort));
+          Serial.println(leggiTofCorto(*tofBackShort));
         }else if(val == 3){
-         Serial.print(leggiTofCorto(*tofLeftShort));
+         Serial.println(leggiTofCorto(*tofLeftShort));
         } else{
-          Serial.print(leggiTofCorto(*tofRightShort));
+          Serial.println(leggiTofCorto(*tofRightShort));
         } 
       }else if(idx == 2){        
         isInvertito = !isInvertito;
