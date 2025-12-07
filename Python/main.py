@@ -1,4 +1,6 @@
+from settings import *
 from imps import *
+from serial_functions import *
 
 # Stati celle in "visited"
 # 0 = white (not yet visited)
@@ -10,6 +12,11 @@ from imps import *
 
 def main():
     world = World()
+    world.ser = serial.Serial('COM6', 115200, timeout=1)
+    print(world.ser)
+    world.check_specified_command("START")
+    print("------ arduino pronto ------")
+
     cv2.namedWindow('Campo', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Campo', VIEW_W, VIEW_H)
 
@@ -33,13 +40,17 @@ def main():
             world.flip_direction(); return 'repath'
         # --- modifica mappa: NON interrompe ---
         elif k == ord('1'):
-            world.set_wall_relative(0, toggle=True); return None
+            world.get_walls("m001,", 0)
+            #world.set_wall_relative(0, toggle=True); return None
         elif k == ord('2'):
-            world.set_wall_relative(1, toggle=True); return None
+            world.get_walls("m002,", 1)
+            #world.set_wall_relative(1, toggle=True); return None
         elif k == ord('3'):
-            world.set_wall_relative(2, toggle=True); return None
+            world.get_walls("m003,", 2)
+            #world.set_wall_relative(2, toggle=True); return None
         elif k == ord('4'):
-            world.set_wall_relative(3, toggle=True); return None
+            world.get_walls("m004,", 3)
+            #world.set_wall_relative(3, toggle=True); return None
         elif k == ord('n') or k == ord('N'):
             dx, dy = world.heading_to_delta()
             nx, ny = world.x + dx, world.y + dy
