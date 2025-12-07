@@ -414,7 +414,8 @@ void setup() {
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
 
-  delay(1000);
+  Serial.println();
+  Serial.println("START");
 }
 
 void loop() {
@@ -464,6 +465,7 @@ void loop() {
     // Separator
     else if(chr == ',') {
       Serial.println("True");
+      delay(100);
       val = atoi(value); // Convert received number string to int
       Serial.flush();
       if(idx == 8)
@@ -519,14 +521,18 @@ void loop() {
         }
       }
       else if(idx == 1){ //lettura Tof
-        if(val == 1){
-          Serial.println(leggiTofCorto(*tofFrontShort));
-        }else if(val == 2){
-          Serial.println(leggiTofCorto(*tofBackShort));
-        }else if(val == 3){
-         Serial.println(leggiTofCorto(*tofLeftShort));
-        } else{
-          Serial.println(leggiTofCorto(*tofRightShort));
+        if(val == 1) {
+          leggiTofCorto(*tofFrontShort);
+          Serial.println(isMuro);
+        } else if(val == 2) {
+          leggiTofCorto(*tofBackShort);
+          Serial.println(isMuro);
+        } else if(val == 3) {
+          leggiTofCorto(*tofLeftShort);
+          Serial.println(isMuro);
+        } else {
+          leggiTofCorto(*tofRightShort);
+          Serial.println(isMuro);
         } 
       }else if(idx == 2){        
         isInvertito = !isInvertito;
