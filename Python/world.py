@@ -1,8 +1,6 @@
 from imps import *
 from settings import *
 
-
-
 class World:
     ser = None
 
@@ -56,9 +54,16 @@ class World:
         recived_command = "False"
         while recived_command != "True":
             recived_command = self.ser.readline().decode('utf-8').rstrip()
-            print(recived_command)
-            return True
-        return False
+            print("ricevuto da seriale:", recived_command)
+            time.sleep(0.01)
+        return True
+
+    def check_specified_command(self, par_command):
+        recived_command = ""
+        while recived_command != par_command:
+            recived_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale:", recived_command)
+            time.sleep(0.01)
 
     """
         Heads towards the delta (how much we have to move)
@@ -198,15 +203,17 @@ class World:
             self.set_wall_absolute(self.x, self.y, abs_idx, 1)
             self.set_wall_absolute(nx, ny, self.opposite_dir(abs_idx), 1)
         self.visit_current()
-        
-    #par_tof is the tof we want to read 
-    def get_walls(self, par_tof):
-        self.ser.write(b''+ par_tof, ) #TODO magari non va un cabby
+
+    #par_tof is the tof we want to read
+    def get_walls(self, par_tof, par_dir):
+        self.ser.write(par_tof.encode())
         if self.check_command():
             is_wall = -1
             while is_wall == -1:
                 is_wall = int(self.ser.readline().decode('utf-8').rstrip())
-                self.set_wall_relative(is_wall, toggle=False)
+                print("is_wall:", is_wall)
+                if is_wall == 1:
+                    self.set_wall_relative(par_dir, toggle=False)
 
     """
         1. Checks if there is a wall in the direction where the player is pointing (forward).
@@ -415,20 +422,17 @@ class World:
     def follow_path(self, path, on_step=None, stop_when_home=False):
         
         for (nx, ny) in path:
-            self.get_walls("m001,")
-            time.sleep(0.5)
-            self.get_walls("m002,")
-            time.sleep(0.5)
-            self.get_walls("m003,")
-            time.sleep(0.5)
-            self.get_walls("m004,")            
+            self.get_walls("m001,", 0)
+            self.get_walls("m002,", 1)
+            self.get_walls("m003,", 2)
+            self.get_walls("m004,", 3)
 
             # orienta verso la prossima cella e prova ad avanzare
             self.face_towards(nx, ny)
             has_moved = self.forward()
             if not has_moved:
                 return False
-            
+
             self.get_color()
 
             # pausa e chance di input
