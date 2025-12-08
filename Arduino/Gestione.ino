@@ -26,7 +26,8 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 
 #pragma region VARIABILI_GLOBALI
 
-int vel = 200; 
+int velStart = 40; 
+int velMax = 255;
 
 uint8_t idx = 0;
 uint8_t val_idx = 0;
@@ -56,12 +57,9 @@ Adafruit_VL6180X* tofRightShort;
 
 
 int CANALE_GYRO = 0;
-int CANALE_TOF_1 = 1; //tof corto
 int CANALE_COLORE_1 = 2;
-int CANALE_TOF_2 = 3; //tof lungo
-int CANALE_TOF_3 = 4; //tof corto
 int CANALE_COLORE_2 = 5;
-int CANALE_TOF_4 = 6; //tof lungo
+
 
 //gyro
 imu::Quaternion q0;
@@ -216,9 +214,9 @@ void setIndirizzo() {
       i = (i + 2) % 4;
     }*/
     digitalWrite(shutdown[i], HIGH);
-    delay(1000);
+    delay(10);
     iniziaTofCorto(*sensori[i], shutdown[i], indirizzo[i]);
-    delay(1000);
+    delay(10);
   }
 }
 
@@ -302,7 +300,7 @@ void encoderReading() {
   } else {
     tickCount += 1;
   }
-  Serial.println(tickCount);
+  //Serial.println(tickCount);
 }
 
 void stopMotori() {
@@ -310,22 +308,22 @@ void stopMotori() {
   analogWrite(PWMB, 0);
 }
 
-void avanti() {
+void avanti(int parVel) {
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, HIGH);
   digitalWrite(BIN1, HIGH);
   digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, vel);
-  analogWrite(PWMB, vel);
+  analogWrite(PWMA, parVel);
+  analogWrite(PWMB, parVel);
 }
 
-void indietro() {
+void indietro(int parVel) {
   digitalWrite(AIN1, HIGH);
   digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, HIGH);
-  analogWrite(PWMA, vel);
-  analogWrite(PWMB, vel);
+  analogWrite(PWMA, parVel);
+  analogWrite(PWMB, parVel);
 }
 
 void sinistra() {
@@ -333,8 +331,8 @@ void sinistra() {
   digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, HIGH);
   digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, vel);
-  analogWrite(PWMB, vel);
+  analogWrite(PWMA, 100);
+  analogWrite(PWMB, 100);
 }
 
 void destra() {
@@ -342,8 +340,30 @@ void destra() {
   digitalWrite(AIN2, HIGH);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, HIGH);
-  analogWrite(PWMA, vel);
-  analogWrite(PWMB, vel);
+  analogWrite(PWMA, 100);
+  analogWrite(PWMB, 100);
+}
+
+int calculateVelocity() {
+  int velocity;
+  double bufferFraction = 1.0 / 9.0; //change it in order to have smoother accelerations/brakes (how long are the acceleration and brake parts)
+  int buffer = (int)round(tickTarget * bufferFraction); 
+
+  if (abs(tickCount) < buffer) { //acceleration part (first ticks)
+    velocity = map((int)abs(tickCount), 0, buffer, velStart, velMax); //convert tickCount from its range (0 - tick of the buffer portion) to another one (velStart - velMax)
+  } else if ((tickTarget - abs(tickCount)) < buffer) { //brake part (last ticks)
+    velocity = map((int)(tickTarget - abs(tickCount)), 0, buffer, velStart, velMax);
+  } else {
+    velocity = velMax;
+  }
+
+  if (velocity < velStart) {
+    velocity = velStart;
+  } else if (velocity > velMax){
+    velocity = velMax;
+  }
+
+  return velocity;
 }
 
 void ruotaRelativa(int gradi, bool versoSinistra) {
@@ -425,10 +445,6 @@ void loop() {
     if(chr == 'g'){ // Orientation read
       idx = 10;
       val_idx=0;
-      leggiGyro();
-      Serial.println(getX());
-      Serial.println(getY());
-      Serial.println(getZ());
     }
     if(chr == 'w') // Movement command
     {
@@ -473,17 +489,20 @@ void loop() {
         cmTarget=val;
         tickTarget = 700 * cmTarget / 22;
         tickCount=0;
-        if (!isInvertito) {
-          avanti();
-        } else {
-          indietro();
-        }
-        while (true) {
+        
+        bool isFinished = false;
+        while (!isFinished) {
+          int vel = calculateVelocity();
+          if (!isInvertito) {
+            avanti(vel);
+          } else {
+            indietro(vel);
+          }
           if (abs(tickCount) >= tickTarget) {
             stopMotori();
             tickCount = 0;
-            break;
-          } 
+            isFinished = true;
+          } /*
           // TORNA INDIETRO
             else {
             // leggi colore
@@ -504,10 +523,11 @@ void loop() {
               while (abs(tickCount) < tickTarget)
               stopMotori();
               tickCount = 0;
-              break;
+              isFinished = true;
             }
-          } 
-        }      
+          }*/ 
+        }  
+        Serial.println("1");    
       }
       else if(idx == 0) { //lettura dei colori  
         uint16_t r, g, b, c;
@@ -551,6 +571,11 @@ void loop() {
       else if(idx == 6)
       {
         ruotaRelativa(val, false);//DESTRA
+      } else if(idx == 10) {
+        leggiGyro();
+        Serial.println(getX());
+        Serial.println(getY());
+        Serial.println(getZ());
       }
       // reset the angle
       value[0] = '0';
