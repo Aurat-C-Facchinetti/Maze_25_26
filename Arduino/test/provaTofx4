@@ -1,0 +1,98 @@
+#include <Wire.h>
+#include <Adafruit_VL6180X.h>
+
+// Indirizzi I2C personalizzati
+#define LOX1_ADDRESS 0x30
+#define LOX2_ADDRESS 0x31
+#define LOX3_ADDRESS 0x32
+#define LOX4_ADDRESS 0x33
+
+// Pin di shutdown tof
+#define SHT_LOX1 9
+#define SHT_LOX2 11
+#define SHT_LOX3 13
+#define SHT_LOX4 15
+
+// Oggetti sensore
+Adafruit_VL6180X lox1;
+Adafruit_VL6180X lox2;
+Adafruit_VL6180X lox3;
+Adafruit_VL6180X lox4;
+
+void iniziaTof(Adafruit_VL6180X &sensor, uint8_t shutPin, uint8_t newAddress) {
+  if (!sensor.begin()) {
+    Serial.print(F("Problema shut TOF: "));
+    Serial.println(shutPin);
+  }
+  sensor.setAddress(newAddress);
+}
+
+void setIndirizzo() {
+  // Tutti in reset
+  digitalWrite(SHT_LOX1, LOW);
+  digitalWrite(SHT_LOX2, LOW);
+  digitalWrite(SHT_LOX3, LOW);
+  digitalWrite(SHT_LOX4, LOW);
+  delay(10);
+
+  // Attivo i 4 TOF uno dopo l’altro
+  Adafruit_VL6180X* sensori[4] = { &lox1, &lox2, &lox3, &lox4 };
+  uint8_t shutdown[4] = { SHT_LOX1, SHT_LOX2, SHT_LOX3, SHT_LOX4 };
+  uint8_t indirizzo[4] = { LOX1_ADDRESS, LOX2_ADDRESS, LOX3_ADDRESS, LOX4_ADDRESS };
+
+  for (uint8_t i = 0; i < 4; i++) {
+    digitalWrite(shutdown[i], HIGH);
+    delay(10);
+    iniziaTof(*sensori[i], shutdown[i], indirizzo[i]);
+    delay(10);
+  }
+}
+
+int leggiTof(Adafruit_VL6180X &sensor) {
+  int range  = sensor.readRange();
+  int status = sensor.readRangeStatus();
+
+  if (status == VL6180X_ERROR_RANGEOFLOW || status == VL6180X_ERROR_RANGEUFLOW || range > 180 || range == 0) {
+    range = -1;
+  }
+
+  return range;
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial)
+  Wire.begin();
+
+  pinMode(SHT_LOX1, OUTPUT);
+  pinMode(SHT_LOX2, OUTPUT);
+  pinMode(SHT_LOX3, OUTPUT);
+  pinMode(SHT_LOX4, OUTPUT);
+  setIndirizzo();
+}
+
+void loop() {
+  // in Serial.print (..., HEX) converte 0x30 in decimale secondo base esadecimale
+  Serial.print(LOX1_ADDRESS, HEX);
+  Serial.print(": ");
+  Serial.print(leggiTof(lox1));
+  Serial.print(" | ");
+
+  Serial.print(LOX2_ADDRESS, HEX);
+  Serial.print(": ");
+  Serial.print(leggiTof(lox2));
+  Serial.print(" | ");
+
+  Serial.print(LOX3_ADDRESS, HEX);
+  Serial.print(": ");
+  Serial.print(leggiTof(lox3));
+  Serial.print(" | ");
+
+  Serial.print(LOX4_ADDRESS, HEX);
+  Serial.print(": ");
+  Serial.print(leggiTof(lox4));
+
+  Serial.println();
+
+  delay(100);
+}
