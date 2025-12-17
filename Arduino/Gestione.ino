@@ -45,10 +45,10 @@ uint8_t LOX2_ADDRESS = 0x31;
 uint8_t LOX3_ADDRESS = 0x32;
 uint8_t LOX4_ADDRESS = 0x33;
 //Tof's Shutdown pins 
-int SHT_LOX1 = 7;
-int SHT_LOX2 = 9;
-int SHT_LOX3 = 11;
-int SHT_LOX4 = 13;
+int SHT_LOX1 = 9;
+int SHT_LOX2 = 11;
+int SHT_LOX3 = 13;
+int SHT_LOX4 = 15;
 
 Adafruit_VL6180X* tofFrontShort;
 Adafruit_VL6180X* tofBackShort;
@@ -110,6 +110,9 @@ void TCA9548A(uint8_t bus){
 #pragma endregion
 
 #pragma region GYRO
+
+#define BNO_RST 2   // <-- scegli un pin libero
+
 
 void iniziaGyro() {
   if (!bno.begin()) {
@@ -418,14 +421,24 @@ void setup() {
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
 
+  pinMode(BNO_RST, OUTPUT);
+  digitalWrite(BNO_RST, LOW);   // <-- tiene spento il BNO (libera 0x29)
+  delay(10);
+
   //setting tofs, gyro and color sensors
   pinMode(SHT_LOX1, OUTPUT);
   pinMode(SHT_LOX2, OUTPUT);
   pinMode(SHT_LOX3, OUTPUT);
   pinMode(SHT_LOX4, OUTPUT);
   aggiornaMappaTof();
+  
   setIndirizzo();
+
+  digitalWrite(BNO_RST, HIGH);  // <-- riaccende il BNO
+  delay(700);                   // <-- tempo boot BNO
+
   iniziaGyro();
+  
   iniziaColore(2);
   iniziaColore(5);
 
@@ -527,7 +540,7 @@ void loop() {
             }
           }*/ 
         }  
-        Serial.println("1");    
+        Serial.println("1");
       }
       else if(idx == 0) { //lettura dei colori  
         uint16_t r, g, b, c;
