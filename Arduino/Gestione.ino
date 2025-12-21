@@ -408,8 +408,10 @@ void rotate(double parTargetAngle) {
     leggiGyro();
     double current = getX();
     double error = angleError(parTargetAngle, current);
-    Serial.print("error ");
-    Serial.println(error);
+    Serial.print("error: ");
+    Serial.print(error);
+    Serial.print("current: ");
+    Serial.println(current);
 
     if ((fabs(error) > 179.95) || (fabs(error) < 0.05)) {
       stopMotori();
@@ -485,7 +487,8 @@ void setup() {
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
 
-  rotate(calculateAbsolutAngle('a', 0));
+  rotate(calculateAbsoluteAngle('a', 0));
+
 
   Serial.println();
   Serial.println("START");
@@ -603,8 +606,10 @@ void loop() {
       } else if (idx == 5)  //SINISTRA
       {
         rotate(calculateAbsoluteAngle('a', val));
+        Serial.println("1");
       } else if (idx == 6) {
         rotate(calculateAbsoluteAngle('d', val));
+        Serial.println("1");
       } else if (idx == 10) {
         leggiGyro();
         Serial.println(getX());
