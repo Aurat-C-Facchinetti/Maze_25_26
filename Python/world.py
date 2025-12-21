@@ -26,7 +26,6 @@ class World:
         # raddoppia subito la matrice per più spazio iniziale
         self.expand_double()
 
-
     # ---------- util direzione ----------
     """
         Translates degrees into direction 
@@ -51,18 +50,18 @@ class World:
         return (idx + 2) % 4
 
     def check_command(self):
-        recived_command = "False"
-        while recived_command != "True":
-            recived_command = self.ser.readline().decode('utf-8').rstrip()
-            print("ricevuto da seriale:", recived_command)
+        received_command = "False"
+        while received_command != "True":
+            received_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale:", received_command)
             time.sleep(0.01)
         return True
 
     def check_specified_command(self, par_command):
-        recived_command = ""
-        while recived_command != par_command:
-            recived_command = self.ser.readline().decode('utf-8').rstrip()
-            print("ricevuto da seriale:", recived_command)
+        received_command = ""
+        while received_command != par_command:
+            received_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale:", received_command)
             time.sleep(0.01)
 
     """
@@ -95,12 +94,14 @@ class World:
         self.deg -= 90
         self.normalize_deg()
         self.ser.write(b'a090,')
+        self.check_specified_command("1")
 
     "Function to rotate right"
     def rotate_right(self):
         self.deg += 90
         self.normalize_deg()
         self.ser.write(b'd090,')
+        self.check_specified_command("1")
 
 
     "Function to flip direction: used when we will be stuck"
@@ -151,7 +152,6 @@ class World:
         If the maximum limit is exceeded, does not expand and returns the clamped coordinates.
     """
     def ensure_inside(self, gx, gy):
-        
         safety = 0
         while gx < 0 or gx >= self.w or gy < 0 or gy >= self.h:
             off_x, off_y = self.expand_double()
@@ -239,6 +239,7 @@ class World:
         if moved:
             self.ser.write(b'w030,')
             self.check_command()
+            self.check_specified_command("1")
             self.x, self.y = nx, ny
             self.visit_current()
         return moved
@@ -282,12 +283,10 @@ class World:
                 self.visited[self.y, self.x] = color
 
 
-
     """
         Returns a dictionary with useful info about the cell
     """
     def get_cell_info(self, gx, gy):
-        
         val = int(self.visited[gy, gx])
         return {
             "x": gx,
@@ -422,10 +421,11 @@ class World:
     def follow_path(self, path, on_step=None, stop_when_home=False):
         
         for (nx, ny) in path:
+            """
             self.get_walls("m001,", 0)
             self.get_walls("m002,", 1)
             self.get_walls("m003,", 2)
-            self.get_walls("m004,", 3)
+            self.get_walls("m004,", 3)"""
 
             # orienta verso la prossima cella e prova ad avanzare
             self.face_towards(nx, ny)
@@ -433,7 +433,7 @@ class World:
             if not has_moved:
                 return False
 
-            self.get_color()
+            #self.get_color()
 
             # pausa e chance di input
             if on_step is not None and on_step():
