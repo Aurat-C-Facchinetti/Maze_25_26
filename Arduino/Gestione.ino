@@ -27,7 +27,7 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 #pragma region VARIABILI_GLOBALI
 
 int velStart = 40;
-int velMax = 255;
+int velMax = 223;
 
 uint8_t idx = 0;
 uint8_t val_idx = 0;
@@ -103,9 +103,6 @@ static inline float clamp01(float v) {
 #pragma endregion
 
 #pragma region GYRO
-
-#define BNO_RST 2
-
 
 void iniziaGyro() {
   if (!bno.begin()) {
@@ -235,6 +232,8 @@ double leggiTofCorto(Adafruit_VL6180X& sensor) {
 
 #pragma region COLOR_SENSOR
 
+int pinColore= 25;
+
 bool iniziaColore() {  //NEL CASO CAMBIA IN VOID
   bool iniz = true;
   if (!tcs.begin()) {
@@ -302,22 +301,22 @@ void stopMotori() {
   analogWrite(PWMB, 0);
 }
 
-void avanti(int parVel) {
+void avanti(int parVelLeft, int parVelRight) {
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, HIGH);
   digitalWrite(BIN1, HIGH);
   digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, parVel);
-  analogWrite(PWMB, parVel);
+  analogWrite(PWMA, parVelLeft);
+  analogWrite(PWMB, parVelRight);
 }
 
-void indietro(int parVel) {
+void indietro(int parVelLeft, int parVelRight) {
   digitalWrite(AIN1, HIGH);
   digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, HIGH);
-  analogWrite(PWMA, parVel);
-  analogWrite(PWMB, parVel);
+  analogWrite(PWMA, parVelRight);
+  analogWrite(PWMB, parVelLeft);
 }
 
 void sinistra(int parvel) {
@@ -351,11 +350,7 @@ int calculateVelocity() {
     velocity = velMax;
   }
 
-  if (velocity < velStart) {
-    velocity = velStart;
-  } else if (velocity > velMax) {
-    velocity = velMax;
-  }
+  velocity = constrain(velocity, velStart, velMax);
 
   return velocity;
 }
@@ -366,54 +361,30 @@ double normalizeAngle(double angle) {
   return angle;
 }
 
-double calculateAbsoluteAngle(char parDirezione, int parAngoloRelativo) {
-  float currentAngle = getX();
-  double target;
-
-  if (parDirezione == 'a') {  //sinistra
-    target = currentAngle + parAngoloRelativo;
-  } else if (parDirezione == 'd') {  //destra
-    target = currentAngle - parAngoloRelativo;
-  } else {
-    target = currentAngle;  //fallback
-  }
-
-  //normalizza a [-180, 180]
-  if (target > 180.0) target -= 360.0;
-  if (target < -180.0) target += 360.0;
-
-  return target;
-}
-
-
 double angleError(double parTarget, double parCurrent) {
   double error = parTarget - parCurrent;
   error = normalizeAngle(parTarget - parCurrent);
   return error;
 }
 
-void rotate(double parTargetAngle) {
-  double kp = 3.0, ki = 0.0, kd = 0.10, integral = 0.0, prevError = 0;
-  unsigned long lastTime = 0;
-
-  parTargetAngle = normalizeAngle(parTargetAngle);
-  Serial.print("partargetangle ");
-  Serial.println(parTargetAngle);
-
-
-  lastTime = millis();
+void rotate(double parTargetDelta) {
+  double kp = 3.0, ki = 0.0, kd = 0.05, integral = 0.0;
+  parTargetDelta = normalizeAngle(parTargetDelta);
+  double prevError = parTargetDelta;
+  leggiGyro();
+  double startAngle = getX();
+  unsigned long lastTime = millis();
 
   bool isArrived = false;
   while (!isArrived) {
     leggiGyro();
-    double current = getX();
-    double error = angleError(parTargetAngle, current);
-    Serial.print("error: ");
-    Serial.print(error);
-    Serial.print("current: ");
-    Serial.println(current);
+    double currentAngle = getX();
+    double currentDelta = normalizeAngle(currentAngle - startAngle);
+    double error = parTargetDelta - currentDelta;
+    //Serial.print("error ");
+    //Serial.println(error);
 
-    if ((fabs(error) > 179.95) || (fabs(error) < 0.05)) {
+    if (fabs(error) < 0.05) {
       stopMotori();
       isArrived = true;
     } else {
@@ -426,10 +397,10 @@ void rotate(double parTargetAngle) {
       prevError = error;
       double outputPid = kp * error + ki * integral + kd * derivative;
 
-      if (outputPid > 150) {
-        outputPid = 150;
-      } else if (outputPid < -150) {
-        outputPid = -150;
+      if (outputPid > 200) {
+        outputPid = 200;
+      } else if (outputPid < -200) {
+        outputPid = -200;
       }
 
       if (outputPid > 0 && outputPid < 100) {
@@ -445,6 +416,7 @@ void rotate(double parTargetAngle) {
       }
     }
   }
+  Serial.println("1");
 }
 
 #pragma endregion
@@ -454,6 +426,9 @@ void setup() {
   Wire.begin();
   while (!Serial) delay(10);
 
+  pinMode(pinColore, OUTPUT);
+  digitalWrite(pinColore, LOW);
+
   //setting motors and encorder's pins
   pinMode(PWMA, OUTPUT);
   pinMode(AIN1, OUTPUT);
@@ -461,10 +436,6 @@ void setup() {
   pinMode(PWMB, OUTPUT);
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
-
-  pinMode(BNO_RST, OUTPUT);
-  digitalWrite(BNO_RST, LOW);  // <-- tiene spento il BNO (libera 0x29)
-  delay(10);
 
   //setting tofs, gyro and color sensors
   pinMode(SHT_LOX1, OUTPUT);
@@ -475,11 +446,12 @@ void setup() {
 
   setIndirizzo();
 
-  digitalWrite(BNO_RST, HIGH);  // <-- riaccende il BNO
-  delay(700);                   // <-- tempo boot BNO
-
   iniziaGyro();
 
+  Serial.print("Acceso");
+  delay(500);
+  digitalWrite(pinColore, HIGH);
+  delay(200);
   iniziaColore();
 
   // encoder
@@ -487,16 +459,16 @@ void setup() {
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
 
-  rotate(calculateAbsoluteAngle('a', 0));
-
-
   Serial.println();
   Serial.println("START");
+
+  
 }
 
 void loop() {
   if (Serial.available()) {
     char chr = Serial.read();
+    #pragma region IDX
     if (chr == 'g') {  // Orientation read
       idx = 10;
       val_idx = 0;
@@ -527,6 +499,8 @@ void loop() {
       val_idx = 0;
     }
 
+    #pragma endregion
+
     // Separator
     else if (chr == ',') {
       Serial.println("True");
@@ -535,45 +509,50 @@ void loop() {
       Serial.flush();
       if (idx == 8) {
         cmTarget = val;
-        tickTarget = 700 * cmTarget / 21.3;
+        tickTarget = 350 * cmTarget / 10.5;
         tickCount = 0;
+
+        leggiGyro();
+        double angoloRiferimento = getX();
 
         bool isFinished = false;
         while (!isFinished) {
-          int vel = calculateVelocity();
+          int velBase = calculateVelocity();
+
+          leggiGyro();
+          double error = angleError(angoloRiferimento, getX());
+          Serial.println(error);
+
+          double prevError = 0;
+          double derivative = error - prevError;
+          prevError = error;
+
+          double Kp = 5.0;
+          double Kd = 0.5;
+
+          int correction = Kp * error + Kd * derivative;
+
+          int maxCorrection = velBase * 0.33; //max 33% of correction, so it avoid big turns
+          correction = constrain(correction, -maxCorrection, maxCorrection);
+          Serial.print("correction: ");
+          Serial.println(correction);
+
+          int velLeft = velBase - correction;
+          int velRight = velBase + correction;
+
+          velLeft = constrain(velLeft, velStart, 255);          
+          velRight = constrain(velRight, velStart, 255);
+
           if (!isInvertito) {
-            avanti(vel);
+            avanti(velLeft, velRight);
           } else {
-            indietro(vel);
+            indietro(velLeft, velRight);
           }
           if (abs(tickCount) >= tickTarget) {
             stopMotori();
             tickCount = 0;
             isFinished = true;
-          } /*
-          // TORNA INDIETRO
-            else {
-            // leggi colore
-            char colore = leggiColore(2, 0, 0, 0, 0);
-
-            if (colore == 'n') {
-              long tickAndata = abs(tickCount);  // cm percorsi
-              stopMotori();
-              delay(50);
-
-              tickTarget = tickAndata;
-              tickCount= 0;
-              if(!isInvertito){
-                indietro();
-              }else{
-                avanti();
-              }
-              while (abs(tickCount) < tickTarget)
-              stopMotori();
-              tickCount = 0;
-              isFinished = true;
-            }
-          }*/
+          }
         }
         Serial.println("1");
       } else if (idx == 0) {  //lettura dei colori
@@ -605,11 +584,17 @@ void loop() {
         aggiornaMappaTof();
       } else if (idx == 5)  //SINISTRA
       {
-        rotate(calculateAbsoluteAngle('a', val));
-        Serial.println("1");
+        if (!isInvertito) {
+          rotate(val);
+        } else {
+          rotate(-val);
+        }
       } else if (idx == 6) {
-        rotate(calculateAbsoluteAngle('d', val));
-        Serial.println("1");
+        if (!isInvertito) {
+          rotate(-val);
+        } else {
+          rotate(val);
+        }
       } else if (idx == 10) {
         leggiGyro();
         Serial.println(getX());
