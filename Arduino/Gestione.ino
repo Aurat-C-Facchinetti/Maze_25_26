@@ -72,6 +72,10 @@ static inline float clamp01(float v) {
   return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
 }
 
+int blackThreshold = 50;
+int reflectiveThreshold = 50;
+bool goBack = false;
+
 #pragma endregion
 
 /*
@@ -244,7 +248,7 @@ bool iniziaColore() {  //NEL CASO CAMBIA IN VOID
 }
 
 // ritorna 'r','v','b','n' ; outStatus: 0 ok, 1 errore/nero (tutti 0)
-char leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* outStatus = nullptr) {
+int leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* outStatus = nullptr) {
 
   uint16_t rr = 0;
   uint16_t gg = 0;
@@ -260,16 +264,14 @@ char leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* ou
     st = 0;
   }
 
-  char dom = 'n';
+  int color = 1;
   if (st == 0) {
-    if (rr > gg && rr > bb) {
-      dom = 'r';
-    } else if (gg > rr && gg > bb) {
-      dom = 'v';
+    if (cc < blackThreshold) {
+      color = 2;
     } else if (bb > rr && bb > gg) {
-      dom = 'b';
-    } else {
-      dom = 'n';
+      color = 3;
+    } else if (cc > reflectiveThreshold) {
+      color = 5;
     }
   }
 
@@ -279,7 +281,12 @@ char leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* ou
   if (b) *b = bb;
   if (c) *c = cc;
 
-  return dom;
+  return color;
+}
+
+void isBlack() {
+  goBack = !goBack;
+  Serial.println("===== NERO, TORNARE INDIETRO =====");
 }
 
 #pragma endregion
@@ -521,7 +528,7 @@ void loop() {
 
           leggiGyro();
           double error = angleError(angoloRiferimento, getX());
-          Serial.println(error);
+          //Serial.println(error);
 
           double prevError = 0;
           double derivative = error - prevError;
@@ -534,8 +541,8 @@ void loop() {
 
           int maxCorrection = velBase * 0.33; //max 33% of correction, so it avoid big turns
           correction = constrain(correction, -maxCorrection, maxCorrection);
-          Serial.print("correction: ");
-          Serial.println(correction);
+          //Serial.print("correction: ");
+          //Serial.println(correction);
 
           int velLeft = velBase - correction;
           int velRight = velBase + correction;
