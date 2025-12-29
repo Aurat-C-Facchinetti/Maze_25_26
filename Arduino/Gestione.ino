@@ -26,8 +26,9 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 
 #pragma region VARIABILI_GLOBALI
 
-int velStart = 40;
+int velStart = 35;
 int velMax = 223;
+double drivePrevError = 0;
 
 uint8_t idx = 0;
 uint8_t val_idx = 0;
@@ -74,7 +75,7 @@ static inline float clamp01(float v) {
 
 int blackThreshold = 50;
 int reflectiveThreshold = 50;
-bool goBack = false;
+volatile bool goBack = false;
 
 #pragma endregion
 
@@ -285,8 +286,8 @@ int leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* out
 }
 
 void isBlack() {
-  goBack = !goBack;
-  Serial.println("===== NERO, TORNARE INDIETRO =====");
+  Serial.println("GOING BACK, black detected");
+  goBack = true;
 }
 
 #pragma endregion
@@ -301,6 +302,9 @@ void encoderReading() {
     tickCount += 1;
   }
   //Serial.println(tickCount);
+  //if (tickCount == 350) {
+    //goBack = true;
+  //}
 }
 
 void stopMotori() {
@@ -344,15 +348,73 @@ void destra(int parvel) {
   analogWrite(PWMB, parvel);
 }
 
-int calculateVelocity() {
+void moveRobot(int parTargetTicks) {
+  goBack = false;
+  leggiGyro();
+  double angoloRiferimento = getX();
+
+  moveForTicks(parTargetTicks, angoloRiferimento, true);
+
+  if (goBack) {
+    long ticksToReturn = abs(tickCount);
+
+    isInvertito = !isInvertito;
+    moveForTicks(ticksToReturn, angoloRiferimento, false);
+    isInvertito = !isInvertito;
+
+    Serial.println("-1");
+  } else {
+    Serial.println("1");
+  }
+}
+
+void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGoBack) {
+  tickCount = 0;
+  drivePrevError = 0;
+
+  while(abs(tickCount) < parTargetTicks) {
+    if (checkGoBack && goBack) {
+      break;
+    }
+    driveStraightStep(parTargetTicks, parAngoloRiferimento);
+  }
+
+  stopMotori();
+}
+
+void driveStraightStep(long parTargetTicks, double parAngoloRiferimento) {
+  double Kp = 5.0, Kd = 0.5;
+  int velBase = calculateVelocity(parTargetTicks);
+
+  leggiGyro();
+  double error = angleError(parAngoloRiferimento, getX());
+
+  double derivative = error - drivePrevError;
+  drivePrevError = error;
+
+  int correction = Kp * error + Kd * derivative;
+  int maxCorrection = velBase * 0.33; //max 33% of correction, so it avoid big turns
+  correction = constrain(correction, -maxCorrection, maxCorrection);
+
+  int velLeft = constrain(velBase - correction, velStart, 255);
+  int velRight = constrain(velBase + correction, velStart, 255);;
+
+  if (!isInvertito) {
+    avanti(velLeft, velRight);
+  } else {
+    indietro(velLeft, velRight);
+  }
+}
+
+int calculateVelocity(long parTicksTarget) {
   int velocity;
   double bufferFraction = 1.0 / 9.0;  //change it in order to have smoother accelerations/brakes (how long are the acceleration and brake parts)
-  int buffer = (int)round(tickTarget * bufferFraction);
+  int buffer = (int)round(parTicksTarget * bufferFraction);
 
   if (abs(tickCount) < buffer) {                                       //acceleration part (first ticks)
     velocity = map((int)abs(tickCount), 0, buffer, velStart, velMax);  //convert tickCount from its range (0 - tick of the buffer portion) to another one (velStart - velMax)
-  } else if ((tickTarget - abs(tickCount)) < buffer) {                 //brake part (last ticks)
-    velocity = map((int)(tickTarget - abs(tickCount)), 0, buffer, velStart, velMax);
+  } else if ((parTicksTarget - abs(tickCount)) < buffer) {                 //brake part (last ticks)
+    velocity = map((int)(parTicksTarget - abs(tickCount)), 0, buffer, velStart, velMax);
   } else {
     velocity = velMax;
   }
@@ -465,6 +527,8 @@ void setup() {
   pinMode(signalA, INPUT);
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
+  pinMode(19, INPUT);
+  //attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
 
   Serial.println();
   Serial.println("START");
@@ -517,51 +581,7 @@ void loop() {
       if (idx == 8) {
         cmTarget = val;
         tickTarget = 350 * cmTarget / 10.5;
-        tickCount = 0;
-
-        leggiGyro();
-        double angoloRiferimento = getX();
-
-        bool isFinished = false;
-        while (!isFinished) {
-          int velBase = calculateVelocity();
-
-          leggiGyro();
-          double error = angleError(angoloRiferimento, getX());
-          //Serial.println(error);
-
-          double prevError = 0;
-          double derivative = error - prevError;
-          prevError = error;
-
-          double Kp = 5.0;
-          double Kd = 0.5;
-
-          int correction = Kp * error + Kd * derivative;
-
-          int maxCorrection = velBase * 0.33; //max 33% of correction, so it avoid big turns
-          correction = constrain(correction, -maxCorrection, maxCorrection);
-          //Serial.print("correction: ");
-          //Serial.println(correction);
-
-          int velLeft = velBase - correction;
-          int velRight = velBase + correction;
-
-          velLeft = constrain(velLeft, velStart, 255);          
-          velRight = constrain(velRight, velStart, 255);
-
-          if (!isInvertito) {
-            avanti(velLeft, velRight);
-          } else {
-            indietro(velLeft, velRight);
-          }
-          if (abs(tickCount) >= tickTarget) {
-            stopMotori();
-            tickCount = 0;
-            isFinished = true;
-          }
-        }
-        Serial.println("1");
+        moveRobot(tickTarget);
       } else if (idx == 0) {  //lettura dei colori
         uint16_t r, g, b, c;
         uint8_t s;
@@ -582,11 +602,6 @@ void loop() {
         }
       } else if (idx == 2) {
         isInvertito = !isInvertito;
-        int temp;
-        //scambio sensori colore
-        temp = CANALE_COLORE_1;
-        CANALE_COLORE_1 = CANALE_COLORE_2;
-        CANALE_COLORE_2 = temp;
         //scambio tof corti
         aggiornaMappaTof();
       } else if (idx == 5)  //SINISTRA
