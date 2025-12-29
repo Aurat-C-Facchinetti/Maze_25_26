@@ -528,12 +528,10 @@ void setup() {
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
   pinMode(19, INPUT);
-  //attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
+  attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
 
   Serial.println();
   Serial.println("START");
-
-  
 }
 
 void loop() {
