@@ -55,12 +55,6 @@ Adafruit_VL6180X* tofBackShort;
 Adafruit_VL6180X* tofLeftShort;
 Adafruit_VL6180X* tofRightShort;
 
-
-int CANALE_GYRO = 0;
-int CANALE_COLORE_1 = 2;
-int CANALE_COLORE_2 = 5;
-
-
 //gyro
 imu::Quaternion q0;
 bool riferimentoImpostato = false;
@@ -157,9 +151,9 @@ float getZ() {
 
 #pragma endregion
 
-#pragma region TOF_CORTO
+#pragma region TOF
 
-void iniziaTofCorto(Adafruit_VL6180X& sensor, uint8_t shutPin, uint8_t newAddress) {
+void iniziaTof(Adafruit_VL6180X& sensor, uint8_t shutPin, uint8_t newAddress) {
   if (!sensor.begin()) {
     Serial.print(F("Problema shut TOF: "));
     Serial.println(shutPin);
@@ -202,7 +196,7 @@ void setIndirizzo() {
     }*/
     digitalWrite(shutdown[i], HIGH);
     delay(10);
-    iniziaTofCorto(*sensori[i], shutdown[i], indirizzo[i]);
+    iniziaTof(*sensori[i], shutdown[i], indirizzo[i]);
     delay(10);
   }
 }
@@ -224,54 +218,6 @@ double leggiTofCorto(Adafruit_VL6180X& sensor) {
 #pragma endregion
 
 #pragma region COLOR_SENSOR
-
-int pinColore= 25;
-
-bool iniziaColore() {  //NEL CASO CAMBIA IN VOID
-  bool iniz = true;
-  if (!tcs.begin()) {
-    Serial.println("Problema: TCS34725 (COLORE)");
-    iniz = false;
-  }
-  return iniz;
-}
-
-// ritorna 'r','v','b','n' ; outStatus: 0 ok, 1 errore/nero (tutti 0)
-int leggiColore(uint16_t* r, uint16_t* g, uint16_t* b, uint16_t* c, uint8_t* outStatus = nullptr) {
-
-  uint16_t rr = 0;
-  uint16_t gg = 0;
-  uint16_t bb = 0;
-  uint16_t cc = 0;
-
-  tcs.getRawData(&rr, &gg, &bb, &cc);
-
-  uint8_t st = 0;
-  if (rr == 0 && gg == 0 && bb == 0 && cc == 0) {
-    st = 1;
-  } else {
-    st = 0;
-  }
-
-  int color = 1;
-  if (st == 0) {
-    if (cc < blackThreshold) {
-      color = 2;
-    } else if (bb > rr && bb > gg) {
-      color = 3;
-    } else if (cc > reflectiveThreshold) {
-      color = 5;
-    }
-  }
-
-  if (outStatus) *outStatus = st;
-  if (r) *r = rr;
-  if (g) *g = gg;
-  if (b) *b = bb;
-  if (c) *c = cc;
-
-  return color;
-}
 
 void isBlack() {
   Serial.println("GOING BACK, black detected");
@@ -481,9 +427,6 @@ void setup() {
   Wire.begin();
   while (!Serial) delay(10);
 
-  pinMode(pinColore, OUTPUT);
-  digitalWrite(pinColore, LOW);
-
   //setting motors and encorder's pins
   pinMode(PWMA, OUTPUT);
   pinMode(AIN1, OUTPUT);
@@ -503,16 +446,12 @@ void setup() {
 
   iniziaGyro();
 
-  Serial.print("Acceso");
-  delay(500);
-  digitalWrite(pinColore, HIGH);
-  delay(200);
-  iniziaColore();
-
   // encoder
   pinMode(signalA, INPUT);
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
+
+  //interrupt for black tile
   pinMode(19, INPUT);
   attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
 
@@ -548,9 +487,6 @@ void loop() {
     } else if (chr == 'd') {
       idx = 6;
       val_idx = 0;
-    } else if (chr == 'c') {
-      idx = 0;
-      val_idx = 0;
     } else if (chr == 'i') { //y axis from the gyro (inclination)
       idx = 3;
       val_idx = 0;
@@ -568,10 +504,6 @@ void loop() {
         cmTarget = val;
         tickTarget = 350 * cmTarget / 10.5;
         moveRobot(tickTarget);
-      } else if (idx == 0) {  //lettura dei colori
-        uint16_t r, g, b, c;
-        uint8_t s;
-        Serial.println(leggiColore(&r, &g, &b, &c, &s));
       } else if (idx == 1) {  //lettura Tof
         if (val == 1) {
           Serial.println(leggiTofCorto(*tofFrontShort));
