@@ -1,11 +1,18 @@
 from imps import *
 from settings import *
+from color_sensor import *
+from side_camera import SideCamera
+import threading
+import time
+import cv2
+from multiprocessing import Process, Queue, Manager
+import search_victims
+import reset_button
+from gpiozero import DigitalOutputDevice
+lop_interrupt = DigitalOutputDevice(17)
 
 class World:
-    ser = None
-
     def __init__(self, rows=INIT_ROWS, cols=INIT_COLS):
-
         # matrice logica
         self.visited = np.zeros((rows, cols), dtype=np.uint8)
         # walls bitmask per N,E,S,W = 1,2,4,8
@@ -25,6 +32,116 @@ class World:
         self.visit_current()
         # raddoppia subito la matrice per più spazio iniziale
         self.expand_double()
+
+        self.ser = None
+        self.isInvertito = False
+
+        self.run_event = threading.Event()
+        self.stop_event = threading.Event()
+        self.thread_check_black = threading.Thread(target=check_black, args=(self.run_event,self.stop_event), daemon=False)
+        self.thread_check_black.start()
+        print("|||||||| thread nero iniziato ||||||||||")
+
+        self.last_checkpoint = self.home
+        self.lop_event = threading.Event()
+        reset_button.setup_button()
+        self.thread_lop_handler = threading.Thread(target=self.handle_lop, daemon=True)
+        self.thread_lop_handler.start()
+        print("|||||||| thread pulsante iniziato ||||||||")
+
+        self.manager = Manager()
+        self.shared_x = self.manager.Value('i', self.w // 2)  # int condiviso
+        self.shared_y = self.manager.Value('i', self.h // 2)  # int condiviso
+        self.shared_deg = self.manager.Value('i', 0)  # int condiviso
+        self.shared_walls = self.manager.dict()  # dict condiviso per walls
+        self.shared_search_victim = self.manager.Value('b', True)
+
+        self.victim_queue = Queue()
+
+        self.shared_running = self.manager.Value('b', True) # flag per terminazione processo
+        self.recogn_proc = Process(
+            target=World.recognition_process,
+            args=(self.shared_x, self.shared_y, self.shared_deg, self.shared_walls, 
+                  self.shared_search_victim, self.victim_queue, self.shared_running)
+        )
+        self.recogn_proc.start()
+        print("||||||| Processo riconoscimento vittime avviato ||||||||")
+
+    @staticmethod
+    def recognition_process(shared_x, shared_y, shared_deg, shared_walls, shared_search_victim, shared_victim_queue, shared_running):
+        right_camera = SideCamera(1)
+        left_camera = SideCamera(0)
+        
+        while shared_running.value:
+            if not shared_search_victim.value:
+                time.sleep(0.1)
+            else:
+                try:
+                    x = shared_x.value
+                    y = shared_y.value
+                    deg = shared_deg.value
+                    
+                    current_dir = ((deg // 90) % 4)
+                    right_dir = (current_dir + 1) % 4
+                    right_wall_bit = [1, 2, 4, 8][right_dir]  # bit_for_dir inline
+                    
+                    key = f"{x},{y}"
+                    walls_value = shared_walls.get(key, 0)
+                    
+                    if (walls_value & right_wall_bit) != 0:
+                        right_camera.capture("right.jpg")
+                        victim = search_victims.search("right.jpg")
+                        if victim:
+                            shared_victim_queue.put({'side': 'right', 'type': victim})
+                            print(f"##### VITTIMA {victim} rilevata a DESTRA #####")
+                            shared_search_victim.value = False
+                    
+                    left_dir = (current_dir + 3) % 4
+                    left_wall_bit = [1, 2, 4, 8][left_dir]
+                    
+                    if (walls_value & left_wall_bit) != 0:
+                        left_camera.capture("left.jpg")
+                        victim = search_victims.search("left.jpg")
+                        if victim:
+                            shared_victim_queue.put({'side': 'left', 'type': victim})
+                            print(f"##### VITTIMA {victim} rilevata a SINISTRA #####")
+                            shared_search_victim.value = False
+                    
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"[ERRORE] Recognition: {e}")
+                    time.sleep(0.5)
+
+            
+    def check_victim_queue(self):
+        try:
+            while not self.victim_queue.empty():
+                victim_data = self.victim_queue.get_nowait()
+                print(f"vittima nella queue: {victim_data}")
+                current_victim_type = victim_data['type']
+                current_victim_side = victim_data['side']
+
+                command = current_victim_type
+                if current_victim_side == 'right':
+                    command = command.upper()
+                else:
+                    command = command.lower()
+                
+                self.ser.write(command.encode())
+            print("queue vuota")
+        except Exception as e:
+            print(f"[ERRORE] check_victim_queue: {e}")
+    
+    def handle_lop(self):
+        while True:
+            reset_button.wait_for_press()
+            print("RESET " * 10)
+
+            lop_interrupt.on()
+            time.sleep(0.05)
+            lop_interrupt.off()
+
+            self.lop_event.set()
 
     # ---------- util direzione ----------
     """
@@ -48,21 +165,59 @@ class World:
     @staticmethod
     def opposite_dir(idx):
         return (idx + 2) % 4
+    
+    def shutdown(self):
+        print("SHUTDOWN WORLD in corso")
+        self.stop_event.set()
+        self.run_event.set()
+        if self.thread_check_black.is_alive():
+            self.thread_check_black.join()
+    
+        if hasattr(self, 'shared_running'):
+            print("Fermando processo riconoscimento...")
+            self.shared_running.value = False  # Segnala al processo di terminare
+            
+        if hasattr(self, 'recognition_proc') and self.recognition_proc.is_alive():
+            print("Aspettando terminazione processo riconoscimento...")
+            self.recognition_proc.join(timeout=3)  # Aspetta max 3 secondi
+            
+            if self.recognition_proc.is_alive():
+                print("Processo non terminato, forzo la chiusura...")
+                self.recognition_proc.terminate()  # Forza la terminazione
+                self.recognition_proc.join(timeout=1)  # Aspetta conferma
+                print("Processo riconoscimento terminato forzatamente")
+            else:
+                print("Processo riconoscimento chiuso correttamente")
+        print("thread check black chiuso, SHUTDOWN WORLD completo")
 
     def check_command(self):
-        received_command = "False"
-        while received_command != "True":
-            received_command = self.ser.readline().decode('utf-8').rstrip()
-            print("ricevuto da seriale:", received_command)
+        recived_command = "False"
+        while recived_command != "True":
+            recived_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale per check 1:", recived_command)
             time.sleep(0.01)
         return True
 
     def check_specified_command(self, par_command):
-        received_command = ""
-        while received_command != par_command:
-            received_command = self.ser.readline().decode('utf-8').rstrip()
-            print("ricevuto da seriale:", received_command)
+        recived_command = ""
+        while recived_command != par_command:
+            recived_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale:", recived_command)
             time.sleep(0.01)
+
+    def check_movement_confirmation(self):
+        recived_command = ""
+        while recived_command != "1" and recived_command != "-1":
+            self.check_victim_queue() #durante un movimento sono dentro questo loop, in quanto aspetto conferma da arduino
+            if self.lop_event.is_set():
+                return False
+            recived_command = self.ser.readline().decode('utf-8').rstrip()
+            print("ricevuto da seriale:", recived_command)
+            time.sleep(0.01)
+        if recived_command == "1":
+            return True
+        else:
+            return False
 
     """
         Heads towards the delta (how much we have to move)
@@ -92,16 +247,22 @@ class World:
     "Function to rotate left"
     def rotate_left(self):
         self.deg -= 90
+        self.shared_deg.value = self.deg
         self.normalize_deg()
         self.ser.write(b'a090,')
-        self.check_specified_command("1")
+        print("------ inviato a090, ------")
+        self.check_command()
+        self.check_movement_confirmation()
 
     "Function to rotate right"
     def rotate_right(self):
         self.deg += 90
+        self.shared_deg.value = self.deg
         self.normalize_deg()
         self.ser.write(b'd090,')
-        self.check_specified_command("1")
+        print("------ inviato d090, ------")
+        self.check_command()
+        self.check_movement_confirmation()
 
 
     "Function to flip direction: used when we will be stuck"
@@ -110,6 +271,13 @@ class World:
         self.normalize_deg()
         self.ser.write(b's,')
         self.check_command()
+        self.isInvertito = not self.isInvertito
+        print("-----    inversione    -----")
+
+        if (not self.isInvertito):
+            self.run_event.set()
+        else:
+            self.run_event.clear()
 
 
     "Function to visit the current cell flagging the cell as visited"
@@ -117,6 +285,9 @@ class World:
         # non sovrascrivere stati speciali (2..5)
         if self.visited[self.y, self.x] == 0:
             self.visited[self.y, self.x] = 1
+        if self.visited[self.y, self.x] == 5:
+            self.last_checkpoint = (self.x, self.y)
+            print(f"::::::::: Checkpoint salvato: ({self.x},{self.y}) ::::::::::")
 
     """ Doubles the matrix keeping the data centered (visited + walls)
         Returns the applied shift (off_x, off_y) to re-align the target coordinates
@@ -152,6 +323,7 @@ class World:
         If the maximum limit is exceeded, does not expand and returns the clamped coordinates.
     """
     def ensure_inside(self, gx, gy):
+        
         safety = 0
         while gx < 0 or gx >= self.w or gy < 0 or gy >= self.h:
             off_x, off_y = self.expand_double()
@@ -177,6 +349,9 @@ class World:
             self.walls[gy, gx] |= bit
         else:
             self.walls[gy, gx] &= (~bit) & 0xF
+        
+        key = f"{gx},{gy}"
+        self.shared_walls[key] = int(self.walls[gy, gx])
 
     """
         Fa la stessa cosa di quello sopra (TODO: Capire perchè è così)
@@ -207,6 +382,7 @@ class World:
     #par_tof is the tof we want to read
     def get_walls(self, par_tof, par_dir):
         self.ser.write(par_tof.encode())
+        print(f"------ inviato {par_tof} ------")
         if self.check_command():
             is_wall = -1
             while is_wall == -1:
@@ -237,11 +413,24 @@ class World:
             return False
         moved = (nx != self.x) or (ny != self.y)
         if moved:
-            self.ser.write(b'w030,')
+            self.ser.write(b'w032,')
+            print("------ inviato w032, ------")
             self.check_command()
-            self.check_specified_command("1")
-            self.x, self.y = nx, ny
-            self.visit_current()
+            if self.check_movement_confirmation():
+                self.x, self.y = nx, ny
+                self.visit_current()
+                self.shared_x.value = self.x
+                self.shared_y.value = self.y
+            else:
+                if not self.lop_event.is_set():
+                    dx, dy = self.heading_to_delta()
+                    nx, ny = self.x + dx, self.y + dy
+                    nx, ny = self.ensure_inside(nx, ny)
+                    for dir_idx in range(4):
+                        self.set_wall_absolute(nx, ny, dir_idx, 1)
+                        self.visited[ny, nx] = 2
+                moved = False
+
         return moved
 
 
@@ -273,20 +462,30 @@ class World:
             variabile = 2"""
         
         return variabile
-
+    
     def get_color(self):
-        self.ser.write(b'c',)
+        if self.visited[self.y, self.x] not in (2, 3, 4, 5):
+            self.visited[self.y, self.x] = check_color()
+        if self.visited[self.y, self.x] == 5:
+            self.last_checkpoint = (self.x, self.y)
+            print(f"::::::::: Checkpoint salvato: ({self.x},{self.y}) ::::::::::")
+    
+    def check_inclination(self):
+        self.ser.write(b'i,')
+        print("------ inviato i, ------")
         if self.check_command():
-            color = -1
-            while color == -1:
-                color = int(self.ser.readline().decode('utf-8').rstrip())
-                self.visited[self.y, self.x] = color
-
+            inclination = 999
+            while inclination == 999:
+                inclination = float(self.ser.readline().decode('utf-8').rstrip())
+            print("inclination da seriale:", inclination)
+            if abs(inclination) >= 20 and abs(inclination) <= 25:
+                self.visited[self.y, self.x] = 4
 
     """
         Returns a dictionary with useful info about the cell
     """
     def get_cell_info(self, gx, gy):
+        
         val = int(self.visited[gy, gx])
         return {
             "x": gx,
@@ -414,35 +613,62 @@ class World:
             else:
                 self.rotate_right()
 
-    """
-        Segui il path passo-passo. Ritorna True se completato, False se bloccato/interrotto.
-        Follows the path step-by-step. Return true if complete, false if stuck.
-    """
     def follow_path(self, path, on_step=None, stop_when_home=False):
-        
-        for (nx, ny) in path:
-            """
-            self.get_walls("m001,", 0)
-            self.get_walls("m002,", 1)
-            self.get_walls("m003,", 2)
-            self.get_walls("m004,", 3)"""
+        """
+        Segui il path passo-passo con rilevamento preventivo dei muri.
+        Ritorna True se completato, False se bloccato/interrotto.
+        """
+        for idx, (nx, ny) in enumerate(path):
+            if self.lop_event.is_set():
+                print("Lop rilevato nel follow path, interrompo movimento")
+                return False
 
-            # orienta verso la prossima cella e prova ad avanzare
+            print(f"::::::::: STEP {idx+1}/{len(path)}: verso ({nx},{ny}) ::::::::::")
+
+            self.shared_search_victim.value = True
+            
+            print("::::::::: SCANSIONE MURI PRIMA DEL MOVIMENTO ::::::::::")
+            self.get_walls("m001,", 0)  # avanti
+            self.get_walls("m002,", 1)  # destra
+            self.get_walls("m003,", 2)  # dietro
+            self.get_walls("m004,", 3)  # sinistra
+            
+            if not self.can_step_to(self.x, self.y, nx, ny):
+                print(f"::::::::: BLOCCATO! Muro tra ({self.x},{self.y}) e ({nx},{ny}) ::::::::::")
+                print("::::::::: Necessario ricalcolo percorso ::::::::::")
+                return False
+            
+            print("::::::::: Orientamento verso destinazione ::::::::::")
             self.face_towards(nx, ny)
+            
+            print("::::::::: Tentativo movimento avanti ::::::::::")
             has_moved = self.forward()
+            
             if not has_moved:
+                print("::::::::: MOVIMENTO FALLITO (conferma Arduino negativa o muro) ::::::::::")
                 return False
-
-            #self.get_color()
-
-            # pausa e chance di input
-            if on_step is not None and on_step():
-                return False
+            
+            print(f"::::::::: Movimento riuscito! Nuova posizione: ({self.x},{self.y}) ::::::::::")
+            
+            print("::::::::: Controllo colore casella ::::::::::")
+            self.get_color()
+            
+            print("::::::::: Controllo inclinazione ::::::::::")
+            self.check_inclination()
+            
+            # ========== PAUSA E INPUT UTENTE ==========
+            if on_step is not None:
+                should_stop = on_step()
+                if should_stop:
+                    print("::::::::: INTERROTTO DA INPUT UTENTE ::::::::::")
+                    return False
+            
             if stop_when_home and (self.x, self.y) == self.home:
+                print("::::::::: RITORNO A CASA COMPLETATO ::::::::::")
                 return True
+        
+        print("::::::::: PERCORSO COMPLETATO ::::::::::")
         return True
-
-
 
     # ---------- rendering ----------
     """
