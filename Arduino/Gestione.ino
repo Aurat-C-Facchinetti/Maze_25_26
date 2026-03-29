@@ -8,6 +8,8 @@
 #include <Adafruit_VL6180X.h>
 #include <Adafruit_TCS34725.h>
 #include <math.h>
+#include <Servo.h>
+#include <avr/wdt.h>
 
 #pragma endregion
 
@@ -22,13 +24,21 @@ Adafruit_VL6180X lox3;
 Adafruit_VL6180X lox4;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
+Servo myservo;
+
 #pragma endregion
 
 #pragma region VARIABILI_GLOBALI
 
-int velStart = 35;
-int velMax = 223;
+int velStart = 100;
+int velMax = 240;
 double drivePrevError = 0; //variable for the derivative component of the PID for linear movement
+
+//Sandra
+int ledVictim = 10;
+int centerPos = 110;
+int rightPos = 145;
+int leftPos = 60;
 
 uint8_t idx = 0;
 uint8_t val_idx = 0;
@@ -40,15 +50,15 @@ bool isInvertito = false;
 float gyroValues[3] = { 0.0, 0.0, 0.0 };
 
 //Custom I2C Addresses
-uint8_t LOX1_ADDRESS = 0x30;
-uint8_t LOX2_ADDRESS = 0x31;
-uint8_t LOX3_ADDRESS = 0x32;
-uint8_t LOX4_ADDRESS = 0x33;
+uint8_t LOX1_ADDRESS = 0x30; //0x30 with the pcb
+uint8_t LOX2_ADDRESS = 0x31; //0x31 with the pcb
+uint8_t LOX3_ADDRESS = 0x32; //0x32 with the pcb
+uint8_t LOX4_ADDRESS = 0x33; //0x33 with the pcb
 //Tof's Shutdown pins
-int SHT_LOX1 = 9;
-int SHT_LOX2 = 11;
-int SHT_LOX3 = 13;
-int SHT_LOX4 = 15;
+int SHT_LOX1 = 33; //9 with the pcb
+int SHT_LOX2 = 32; //11 with the pcb
+int SHT_LOX3 = 30; //13 with the pcb
+int SHT_LOX4 = 5; //15 with the pcb
 
 Adafruit_VL6180X* tofFrontShort;
 Adafruit_VL6180X* tofBackShort;
@@ -66,8 +76,6 @@ static inline float clamp01(float v) {
   return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
 }
 
-int blackThreshold = 50;
-int reflectiveThreshold = 50;
 volatile bool goBack = false;
 
 #pragma endregion
@@ -75,17 +83,17 @@ volatile bool goBack = false;
 #pragma region PIN_MOTORI_AND_ENCODERS
 
 // Motore A (sx)
-#define PWMA 3
-#define AIN1 4
-#define AIN2 5
+#define PWMA 6
+#define AIN1 23
+#define AIN2 22
 
 // Motore B (dx)
-#define PWMB 6
-#define BIN1 7
-#define BIN2 8
+#define PWMB 7
+#define BIN1 24
+#define BIN2 25
 
 #define signalA 18
-#define signalB 23
+#define signalB 17
 
 #pragma endregion
 
@@ -164,16 +172,16 @@ void iniziaTof(Adafruit_VL6180X& sensor, uint8_t shutPin, uint8_t newAddress) {
 void aggiornaMappaTof() {
   if (!isInvertito) {
     // robot normale
-    tofFrontShort = &lox1;
-    tofBackShort = &lox3;
-    tofLeftShort = &lox2;
-    tofRightShort = &lox4;
+    tofFrontShort = &lox1; //1 with the pcb
+    tofBackShort = &lox3; //3 with the pcb
+    tofLeftShort = &lox4; //4 with the pcb
+    tofRightShort = &lox2; //2 with the pcb
   } else {
     // robot girato: front <-> back, left <-> right
     tofFrontShort = &lox3;
     tofBackShort = &lox1;
-    tofLeftShort = &lox4;
-    tofRightShort = &lox2;
+    tofLeftShort = &lox2;
+    tofRightShort = &lox4;
   }
 }
 void setIndirizzo() {
@@ -201,7 +209,7 @@ void setIndirizzo() {
   }
 }
 
-double leggiTofCorto(Adafruit_VL6180X& sensor) {
+double leggiTof(Adafruit_VL6180X& sensor) {
   int range = sensor.readRange();
   int status = sensor.readRangeStatus();
   if (status == VL6180X_ERROR_RANGEOFLOW || status == VL6180X_ERROR_RANGEUFLOW || range > 180 || range == 0) {
@@ -210,18 +218,27 @@ double leggiTofCorto(Adafruit_VL6180X& sensor) {
   } else {
     double ris;
     ris = range / 10.0;      // cm
-    isMuro = (ris <= 10.0);  // soglia 10 cm
+    isMuro = (ris <= 12.0);  // soglia 10 cm
   }
   return range;
 }
 
 #pragma endregion
 
-#pragma region COLOR_SENSOR
+#pragma region INTERRUPTS
 
 void isBlack() {
   Serial.println("GOING BACK, black detected");
   goBack = true;
+}
+
+void reset() {
+  PORTH &= ~(1 << PH3);
+  PORTH &= ~(1 << PH4);
+
+  wdt_enable(WDTO_15MS);
+
+  while(1);
 }
 
 #pragma endregion
@@ -249,24 +266,24 @@ void stopMotori() {
 void avanti(int parVelLeft, int parVelRight) {
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, HIGH);
-  digitalWrite(BIN1, HIGH);
-  digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, parVelLeft);
-  analogWrite(PWMB, parVelRight);
-}
-
-void indietro(int parVelLeft, int parVelRight) {
-  digitalWrite(AIN1, HIGH);
-  digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, HIGH);
   analogWrite(PWMA, parVelRight);
   analogWrite(PWMB, parVelLeft);
 }
 
-void sinistra(int parvel) {
+void indietro(int parVelLeft, int parVelRight) {
   digitalWrite(AIN1, HIGH);
   digitalWrite(AIN2, LOW);
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMA, parVelLeft);
+  analogWrite(PWMB, parVelRight);
+}
+
+void sinistra(int parvel) {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
   digitalWrite(BIN1, HIGH);
   digitalWrite(BIN2, LOW);
   analogWrite(PWMA, parvel);
@@ -274,8 +291,8 @@ void sinistra(int parvel) {
 }
 
 void destra(int parvel) {
-  digitalWrite(AIN1, LOW);
-  digitalWrite(AIN2, HIGH);
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, HIGH);
   analogWrite(PWMA, parvel);
@@ -289,20 +306,20 @@ void moveRobot(int parTargetTicks) { //function that controls the linear movemnt
 
   moveForTicks(parTargetTicks, angoloRiferimento, true); //true -> check if goBack goes to true and, if it does, return at the starting point
 
-  if (goBack) { //if it need to return at the starting point
+  if (goBack) { //if it needs to return at the starting point
     long ticksToReturn = abs(tickCount);
 
     isInvertito = !isInvertito; //in order to go backwards
     moveForTicks(ticksToReturn, angoloRiferimento, false); //false -> ignore goBack flag (it's already returning at the starting position)
     isInvertito = !isInvertito; //goes back to normal direction
 
-    Serial.println("-1"); //he returned at the starting point -> no movement response to raspy
+    Serial.println("-1"); //he returned at the starting point -> negative movement response to raspy
   } else {
-    Serial.println("1"); //movement completed correctly said to raspy-
+    Serial.println("1"); //movement completed correctly -> positive movement response to raspy
   }
 }
 
-void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGoBack) { //function that continue to move untill it reaches the target or some black is detected (goBack flag setted to true)
+void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGoBack) { //function that continues to move untill it reaches the target or some black is detected (goBack flag setted to true)
   tickCount = 0;
   drivePrevError = 0; //reset the previous error for the derivative part of the PID
 
@@ -311,6 +328,7 @@ void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGo
       break;
     }
     driveStraightStep(parTargetTicks, parAngoloRiferimento); //uses PID to move the motors at the right velocity (also keep the robot straight)
+    checkSerial();
   }
 
   stopMotori();
@@ -380,12 +398,14 @@ void rotate(double parTargetDelta) {
 
   bool isArrived = false;
   while (!isArrived) {
+    checkSerial();
     leggiGyro();
     double currentAngle = getX();
     double currentDelta = normalizeAngle(currentAngle - startAngle);
     double error = parTargetDelta - currentDelta;
+    //Serial.println(error);
 
-    if (fabs(error) < 0.05) {
+    if (fabs(error) < 0.05) {      
       stopMotori();
       isArrived = true;
     } else {
@@ -398,16 +418,16 @@ void rotate(double parTargetDelta) {
       prevError = error;
       double outputPid = kp * error + ki * integral + kd * derivative;
 
-      if (outputPid > 200) {
-        outputPid = 200;
-      } else if (outputPid < -200) {
-        outputPid = -200;
+      if (outputPid > 255) {
+        outputPid = 255;
+      } else if (outputPid < -255) {
+        outputPid = -255;
       }
 
-      if (outputPid > 0 && outputPid < 100) {
-        outputPid = 100;
-      } else if (outputPid > -100 && outputPid < 0) {
-        outputPid = -100;
+      if (outputPid > 0 && outputPid < 155) {
+        outputPid = 155;
+      } else if (outputPid > -155 && outputPid < 0) {
+        outputPid = -155;
       }
 
       if (outputPid > 0) {
@@ -418,6 +438,63 @@ void rotate(double parTargetDelta) {
     }
   }
   Serial.println("1");
+}
+
+#pragma endregion
+
+#pragma region VITTIME
+
+void blinkVictim() {
+  for ( int i = 0; i < 5; i++) { //it repeat for five times and alternate by a half second beetween on/off
+    digitalWrite( ledVictim, HIGH);
+    delay(500);
+    digitalWrite( ledVictim, LOW);
+    delay(500);
+  }
+}
+
+void shootRight() {
+  myservo.write(rightPos);
+  delay(300);
+  myservo.write(centerPos);
+}
+
+void shootLeft() {
+  myservo.write(leftPos);
+  delay(300);
+  myservo.write(centerPos);
+}
+
+void checkSerial() {
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    stopMotori();
+    //blinkVictim();
+    if ( cmd == 'U' || cmd == 'u' ){
+      Serial.println("Victim: Unharmed ");
+    } else if ( cmd == 'H' || cmd == 'h' ){
+      Serial.print("Victim: Harmed ");
+      if (cmd == 'h') {
+        Serial.println("left");
+        //shootLeft();
+        //shootLeft();
+      } else { //it's not lowercase, so it's uppercase (right)
+        Serial.println("right");
+        //shootRight();
+        //shootRight();
+      }
+    } else if ( cmd == 'S' || cmd == 's' ){
+      Serial.print("Victim: Stable ");
+      if (cmd == 's') {
+        Serial.println("left");
+        //shootLeft();
+      } else { //it's not lowercase, so it's uppercase (right)
+        Serial.println("right");
+        //shootRight();
+      }
+    }
+    delay(1500);
+  }
 }
 
 #pragma endregion
@@ -452,8 +529,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
 
   //interrupt for black tile
-  pinMode(19, INPUT);
-  attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
+  //pinMode(19, INPUT);
+  //attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
+  pinMode(2, INPUT);
+  attachInterrupt(digitalPinToInterrupt(2), reset, RISING);
 
   Serial.println();
   Serial.println("START");
@@ -497,25 +576,29 @@ void loop() {
     // Separator
     else if (chr == ',') {
       Serial.println("True");
-      delay(50);
       val = atoi(value);  // Convert received number string to int
       Serial.flush();
       if (idx == 8) {
         cmTarget = val;
-        tickTarget = 350 * cmTarget / 10.5;
+        tickTarget = 1000 * cmTarget / 30;
+        Serial.println(tickTarget);
         moveRobot(tickTarget);
       } else if (idx == 1) {  //lettura Tof
         if (val == 1) {
-          Serial.println(leggiTofCorto(*tofFrontShort));
+          //Serial.println(leggiTof(*tofFrontShort));
+          leggiTof(*tofFrontShort);
           Serial.println(isMuro);
         } else if (val == 2) {
-          Serial.println(leggiTofCorto(*tofBackShort));
+          //Serial.println(leggiTof(*tofRightShort));
+          leggiTof(*tofRightShort);
           Serial.println(isMuro);
-        } else if (val == 3) {
-          Serial.println(leggiTofCorto(*tofLeftShort));
+        } else if (val == 3) { //back
+          //Serial.println(leggiTof(*tofLeftShort));
+          leggiTof(*tofLeftShort);
           Serial.println(isMuro);
-        } else {
-          Serial.println(leggiTofCorto(*tofRightShort));
+        } else { //left
+          //Serial.println(leggiTof(*tofBackShort));
+          leggiTof(*tofBackShort);
           Serial.println(isMuro);
         }
       } else if (idx == 2) {
