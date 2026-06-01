@@ -13,28 +13,29 @@
 
 #pragma endregion
 
-#pragma region COSTRUTTORI
+#pragma region CONSTRUCTORS
 
-//Adafruit_BNO055   bno = Adafruit_BNO055(55, 0x29, &Wire);
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28);
-//Sensor objects
+
 Adafruit_VL6180X lox1;
 Adafruit_VL6180X lox2;
 Adafruit_VL6180X lox3;
 Adafruit_VL6180X lox4;
+Adafruit_VL6180X lox5;
+Adafruit_VL6180X lox6;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
 Servo myservo;
 
 #pragma endregion
 
-#pragma region VARIABILI_GLOBALI
+#pragma region GLOBAL_VARIABLES
 
+int rifAngle = 0;
 int velStart = 100;
 int velMax = 240;
-double drivePrevError = 0; //variable for the derivative component of the PID for linear movement
+double drivePrevError = 0;
 
-//Sandra
 int ledVictim = 10;
 int centerPos = 110;
 int rightPos = 145;
@@ -42,30 +43,38 @@ int leftPos = 60;
 
 uint8_t idx = 0;
 uint8_t val_idx = 0;
-char value[4] = "000";  // holds received angle string (e.g., "090")
+char value[4] = "000";
 int val, cmTarget, tickTarget, encoder1Count;
 bool isMuro = false;
 volatile long tickCount = 0;
 bool isInvertito = false;
 float gyroValues[3] = { 0.0, 0.0, 0.0 };
 
-//Custom I2C Addresses
-uint8_t LOX1_ADDRESS = 0x30; //0x30 with the pcb
-uint8_t LOX2_ADDRESS = 0x31; //0x31 with the pcb
-uint8_t LOX3_ADDRESS = 0x32; //0x32 with the pcb
-uint8_t LOX4_ADDRESS = 0x33; //0x33 with the pcb
-//Tof's Shutdown pins
-int SHT_LOX1 = 33; //9 with the pcb
-int SHT_LOX2 = 32; //11 with the pcb
-int SHT_LOX3 = 30; //13 with the pcb
-int SHT_LOX4 = 5; //15 with the pcb
+// Custom I2C Addresses
+uint8_t LOX1_ADDRESS = 0x30;
+uint8_t LOX2_ADDRESS = 0x31;
+uint8_t LOX3_ADDRESS = 0x32;
+uint8_t LOX4_ADDRESS = 0x33;
+uint8_t LOX5_ADDRESS = 0x34;
+uint8_t LOX6_ADDRESS = 0x35;
 
-Adafruit_VL6180X* tofFrontShort;
-Adafruit_VL6180X* tofBackShort;
-Adafruit_VL6180X* tofLeftShort;
-Adafruit_VL6180X* tofRightShort;
+// TOF shutdown pins
+int SHT_LOX1 = 33;
+int SHT_LOX2 = 32;
+int SHT_LOX3 = 30;
+int SHT_LOX4 = 5;
+int SHT_LOX5 = 4;  // update with actual pin
+int SHT_LOX6 = 3;  // update with actual pin
 
-//gyro
+// TOF pointers: 1=front, 2=right-front, 3=right-back, 4=back, 5=left-back, 6=left-front
+Adafruit_VL6180X* tofFront;
+Adafruit_VL6180X* tofRightFront;
+Adafruit_VL6180X* tofRightBack;
+Adafruit_VL6180X* tofBack;
+Adafruit_VL6180X* tofLeftBack;
+Adafruit_VL6180X* tofLeftFront;
+
+// Gyro reference quaternion
 imu::Quaternion q0;
 bool riferimentoImpostato = false;
 
@@ -80,14 +89,14 @@ volatile bool goBack = false;
 
 #pragma endregion
 
-#pragma region PIN_MOTORI_AND_ENCODERS
+#pragma region MOTOR_AND_ENCODER_PINS
 
-// Motore A (sx)
+// Motor A (left)
 #define PWMA 6
 #define AIN1 23
 #define AIN2 22
 
-// Motore B (dx)
+// Motor B (right)
 #define PWMB 7
 #define BIN1 24
 #define BIN2 25
@@ -101,7 +110,7 @@ volatile bool goBack = false;
 
 void iniziaGyro() {
   if (!bno.begin()) {
-    Serial.println("Problema: BNO055 (GYRO)");
+    Serial.println("Error: BNO055 (GYRO)");
   }
   delay(1000);
   bno.setExtCrystalUse(true);
@@ -109,16 +118,14 @@ void iniziaGyro() {
 }
 
 void leggiGyro() {
-  // Leggi quaternione attuale
   imu::Quaternion q = bno.getQuat();
 
-  // Alla prima chiamata: salva come riferimento e basta
   if (!riferimentoImpostato) {
     q0 = q;
     riferimentoImpostato = true;
   }
 
-  // Rotazione relativa: q_rel = inv(q0)*q = conj(q0)*q
+  // Relative rotation: q_rel = conj(q0) * q
   imu::Quaternion q_rel = q0.conjugate() * q;
 
   float w = q_rel.w();
@@ -126,16 +133,16 @@ void leggiGyro() {
   float y = q_rel.y();
   float z = q_rel.z();
 
-  // roll (X)
+  // Roll (X axis)
   float roll = rad2deg(atan2f(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y * y)));
-  // pitch (Y)
+  // Pitch (Y axis)
   float s = 2.0f * (w * y - z * x);
   s = clamp01(s);
   float pitch = rad2deg(asinf(s));
-  // yaw / heading (Z)
+  // Yaw / heading (Z axis)
   float heading = rad2deg(atan2f(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z)));
 
-  // Normalizza heading a [-180, 180]
+  // Normalize heading to [-180, 180]
   if (heading < -180.0f) heading += 360.0f;
   if (heading > 180.0f) heading -= 360.0f;
 
@@ -144,18 +151,9 @@ void leggiGyro() {
   gyroValues[2] = pitch;
 }
 
-float getX() {
-  return gyroValues[0];  // primo elemento
-}
-
-float getY() {
-  return gyroValues[1];  // secondo elemento
-}
-
-float getZ() {
-  return gyroValues[2];  // terzo elemento
-}
-
+float getX() { return gyroValues[0]; }
+float getY() { return gyroValues[1]; }
+float getZ() { return gyroValues[2]; }
 
 #pragma endregion
 
@@ -163,7 +161,7 @@ float getZ() {
 
 void iniziaTof(Adafruit_VL6180X& sensor, uint8_t shutPin, uint8_t newAddress) {
   if (!sensor.begin()) {
-    Serial.print(F("Problema shut TOF: "));
+    Serial.print(F("Error: TOF shutdown pin "));
     Serial.println(shutPin);
   }
   sensor.setAddress(newAddress);
@@ -171,37 +169,39 @@ void iniziaTof(Adafruit_VL6180X& sensor, uint8_t shutPin, uint8_t newAddress) {
 
 void aggiornaMappaTof() {
   if (!isInvertito) {
-    // robot normale
-    tofFrontShort = &lox1; //1 with the pcb
-    tofBackShort = &lox3; //3 with the pcb
-    tofLeftShort = &lox4; //4 with the pcb
-    tofRightShort = &lox2; //2 with the pcb
+    tofFront      = &lox1;
+    tofRightFront = &lox2;
+    tofRightBack  = &lox3;
+    tofBack       = &lox4;
+    tofLeftBack   = &lox5;
+    tofLeftFront  = &lox6;
   } else {
-    // robot girato: front <-> back, left <-> right
-    tofFrontShort = &lox3;
-    tofBackShort = &lox1;
-    tofLeftShort = &lox2;
-    tofRightShort = &lox4;
+    // Robot inverted: front <-> back, left-front <-> right-back, left-back <-> right-front
+    tofFront      = &lox4;
+    tofBack       = &lox1;
+    tofRightFront = &lox5;
+    tofRightBack  = &lox6;
+    tofLeftBack   = &lox2;
+    tofLeftFront  = &lox3;
   }
 }
+
 void setIndirizzo() {
-  // Tutti in reset
+  // Put all TOFs in reset
   digitalWrite(SHT_LOX1, LOW);
   digitalWrite(SHT_LOX2, LOW);
   digitalWrite(SHT_LOX3, LOW);
   digitalWrite(SHT_LOX4, LOW);
+  digitalWrite(SHT_LOX5, LOW);
+  digitalWrite(SHT_LOX6, LOW);
   delay(10);
 
-  // Attivo i 4 TOF uno dopo l’altro
-  Adafruit_VL6180X* sensori[4] = { &lox1, &lox2, &lox3, &lox4 };
-  uint8_t shutdown[4] = { SHT_LOX1, SHT_LOX2, SHT_LOX3, SHT_LOX4 };
-  uint8_t indirizzo[4] = { LOX1_ADDRESS, LOX2_ADDRESS, LOX3_ADDRESS, LOX4_ADDRESS };
+  // Enable TOFs one by one and assign custom I2C addresses
+  Adafruit_VL6180X* sensori[6] = { &lox1, &lox2, &lox3, &lox4, &lox5, &lox6 };
+  uint8_t shutdown[6] = { SHT_LOX1, SHT_LOX2, SHT_LOX3, SHT_LOX4, SHT_LOX5, SHT_LOX6 };
+  uint8_t indirizzo[6] = { LOX1_ADDRESS, LOX2_ADDRESS, LOX3_ADDRESS, LOX4_ADDRESS, LOX5_ADDRESS, LOX6_ADDRESS };
 
-  for (uint8_t i = 0; i < 4; i++) {
-    /*if (isInvertito) 
-    {
-      i = (i + 2) % 4;
-    }*/
+  for (uint8_t i = 0; i < 6; i++) {
     digitalWrite(shutdown[i], HIGH);
     delay(10);
     iniziaTof(*sensori[i], shutdown[i], indirizzo[i]);
@@ -216,9 +216,8 @@ double leggiTof(Adafruit_VL6180X& sensor) {
     range = -1;
     isMuro = false;
   } else {
-    double ris;
-    ris = range / 10.0;      // cm
-    isMuro = (ris <= 12.0);  // soglia 10 cm
+    double ris = range / 10.0; // convert to cm
+    isMuro = (ris <= 12.0);
   }
   return range;
 }
@@ -235,27 +234,16 @@ void isBlack() {
 void reset() {
   PORTH &= ~(1 << PH3);
   PORTH &= ~(1 << PH4);
-
   wdt_enable(WDTO_15MS);
-
-  while(1);
+  while (1);
 }
 
 #pragma endregion
 
-#pragma region MOTORI
+#pragma region MOTORS
 
 void encoderReading() {
-  int B = digitalRead(signalB);
-  if (B == 1) {
-    tickCount -= 1;
-  } else {
-    tickCount += 1;
-  }
-  //Serial.println(tickCount);
-  //if (tickCount == 350) { //used to simulate the interrupt from the color sensor/raspy
-    //goBack = true;
-  //}
+  tickCount += 1;
 }
 
 void stopMotori() {
@@ -264,30 +252,21 @@ void stopMotori() {
 }
 
 void avanti(int parVelLeft, int parVelRight) {
-  digitalWrite(AIN1, LOW);
-  digitalWrite(AIN2, HIGH);
-  digitalWrite(BIN1, LOW);
-  digitalWrite(BIN2, HIGH);
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
   analogWrite(PWMA, parVelRight);
   analogWrite(PWMB, parVelLeft);
 }
 
 void indietro(int parVelLeft, int parVelRight) {
-  digitalWrite(AIN1, HIGH);
-  digitalWrite(AIN2, LOW);
-  digitalWrite(BIN1, HIGH);
-  digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, parVelLeft);
-  analogWrite(PWMB, parVelRight);
-}
-
-void sinistra(int parvel) {
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, HIGH);
-  digitalWrite(BIN1, HIGH);
-  digitalWrite(BIN2, LOW);
-  analogWrite(PWMA, parvel);
-  analogWrite(PWMB, parvel);
+  digitalWrite(BIN1, LOW);
+  digitalWrite(BIN2, HIGH);
+  analogWrite(PWMA, parVelLeft);
+  analogWrite(PWMB, parVelRight);
 }
 
 void destra(int parvel) {
@@ -299,57 +278,105 @@ void destra(int parvel) {
   analogWrite(PWMB, parvel);
 }
 
-void moveRobot(int parTargetTicks) { //function that controls the linear movemnt of the robot (it handles the goBack flag activation)
+void sinistra(int parvel) {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMA, parvel);
+  analogWrite(PWMB, parvel);
+}
+
+void moveRobot(int parTargetTicks) {
+  // Controls linear movement and handles the goBack flag
   goBack = false;
   leggiGyro();
-  double angoloRiferimento = getX();
 
-  moveForTicks(parTargetTicks, angoloRiferimento, true); //true -> check if goBack goes to true and, if it does, return at the starting point
+  // --- PRE-MOVEMENT LATERAL TOF READING ---
+  // Read the 4 lateral TOFs to calculate the robot's skew relative to the cell walls.
+  // D_SENSORI = physical distance [mm] between the front and rear TOF on the same side.
+  // Measure this on the physical robot and update accordingly.
+  const float D_SENSORI = 40.0;
 
-  if (goBack) { //if it needs to return at the starting point
+  float SL_F = leggiTof(*tofLeftFront);
+  float SL_B = leggiTof(*tofLeftBack);
+  float SR_F = leggiTof(*tofRightFront);
+  float SR_B = leggiTof(*tofRightBack);
+
+  bool hasSx = (SL_F > 0 && SL_B > 0);
+  bool hasDx = (SR_F > 0 && SR_B > 0);
+
+  double correctionAngle = 0.0;
+
+  // Calculate skew angle using atan2 on the difference between front/rear readings on each side.
+  // If both sides have valid walls, average the two skew estimates for better accuracy.
+  if (hasSx && hasDx) { //formula to calculate the compensation for the default angle
+    double skewL = atan2(SL_F - SL_B, D_SENSORI) * 180.0 / M_PI;
+    double skewR = atan2(SR_B - SR_F, D_SENSORI) * 180.0 / M_PI;
+    correctionAngle = (skewL + skewR) / 2.0;
+  } else if (hasSx) {
+    correctionAngle = atan2(SL_F - SL_B, D_SENSORI) * 180.0 / M_PI;
+  } else if (hasDx) {
+    correctionAngle = atan2(SR_B - SR_F, D_SENSORI) * 180.0 / M_PI;
+  }
+  // If no wall is visible on either side, correctionAngle stays 0 and movement proceeds normally
+
+  // Apply skew correction to the reference angle so the robot drives aligned to the cell
+  rifAngle += correctionAngle; //compensation formula
+
+  // Move forward for the target number of ticks; stop early if goBack is triggered
+  moveForTicks(parTargetTicks, rifAngle, true);
+
+  if (goBack) {
+    // Black tile detected: return to the last checkpoint
     long ticksToReturn = abs(tickCount);
 
-    isInvertito = !isInvertito; //in order to go backwards
-    moveForTicks(ticksToReturn, angoloRiferimento, false); //false -> ignore goBack flag (it's already returning at the starting position)
-    isInvertito = !isInvertito; //goes back to normal direction
+    isInvertito = !isInvertito;                    // reverse direction
+    moveForTicks(ticksToReturn, rifAngle, false);  // go back, ignore goBack flag
+    isInvertito = !isInvertito;                    // restore original direction
 
-    Serial.println("-1"); //he returned at the starting point -> negative movement response to raspy
+    rifAngle -= correctionAngle; // restore reference angle after goBack
+
+    Serial.println("-1"); // negative response to Raspberry: movement was interrupted
   } else {
-    Serial.println("1"); //movement completed correctly -> positive movement response to raspy
+    // Movement completed: remove the skew correction so the robot is re-centered in the cell
+    rifAngle -= correctionAngle;
+
+    Serial.println("1"); // positive response to Raspberry: movement completed successfully
   }
 }
 
-void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGoBack) { //function that continues to move untill it reaches the target or some black is detected (goBack flag setted to true)
+void moveForTicks(long parTargetTicks, double parAngoloRiferimento, bool checkGoBack) {
+  // Moves until the target tick count is reached or goBack is triggered
   tickCount = 0;
-  drivePrevError = 0; //reset the previous error for the derivative part of the PID
+  drivePrevError = 0; // reset derivative error for the straight-drive PID
 
-  while(abs(tickCount) < parTargetTicks) {
-    if (checkGoBack && goBack) { //if he needs to check goBack and goBack is actually true -> exit the loop and stop the motors
+  while (abs(tickCount) < parTargetTicks) {
+    if (checkGoBack && goBack) { // exit loop if goBack is triggered and we are checking for it
       break;
     }
-    driveStraightStep(parTargetTicks, parAngoloRiferimento); //uses PID to move the motors at the right velocity (also keep the robot straight)
-    checkSerial();
+    driveStraightStep(parTargetTicks, parAngoloRiferimento); // PID step: adjust motor speeds to drive straight
   }
 
   stopMotori();
 }
 
 void driveStraightStep(long parTargetTicks, double parAngoloRiferimento) {
-  double Kp = 5.0, Kd = 0.5;
-  int velBase = calculateVelocity(parTargetTicks); //calculate the base velocity th robot has to go (acc./max vel./dec.)
+  double Kp = 75.0, Kd = 0.8;
+  int velBase = calculateVelocity(parTargetTicks); // compute base speed with acceleration/deceleration profile
 
   leggiGyro();
-  double error = angleError(parAngoloRiferimento, getX()); //calcutates the error between the actual heading and the ref. heading
+  double error = angleError(parAngoloRiferimento, getX()); // heading error between target and current angle
 
   double derivative = error - drivePrevError;
-  drivePrevError = error; //update the previuos error
+  drivePrevError = error; // update previous error for next derivative calculation
 
-  int correction = Kp * error + Kd * derivative; //calculate the correction he needs to apply at the velocity on each side in order to compensate the error
-  int maxCorrection = velBase * 0.33; //max 33% of correction, so it avoid big turns
-  correction = constrain(correction, -maxCorrection, maxCorrection); //keeps the correction in a certain range of values (min - corr. - max)
+  int correction = Kp * error + Kd * derivative;     // PID correction to apply to each side
+  int maxCorrection = velBase * 0.33;                 // cap correction at 33% of base speed to avoid sharp turns
+  correction = constrain(correction, -maxCorrection, maxCorrection);
 
-  int velLeft = constrain(velBase - correction, velStart, 255); //keeps the velocity over the minimum velocity to move and the max velocity
-  int velRight = constrain(velBase + correction, velStart, 255);;
+  int velLeft  = constrain(velBase + correction, velStart, 255);
+  int velRight = constrain(velBase - correction, velStart, 255);
 
   if (!isInvertito) {
     avanti(velLeft, velRight);
@@ -359,21 +386,24 @@ void driveStraightStep(long parTargetTicks, double parAngoloRiferimento) {
 }
 
 int calculateVelocity(long parTicksTarget) {
-  int velocity;
-  double bufferFraction = 1.0 / 9.0;  //change it in order to have smoother accelerations/brakes (how long are the acceleration and brake parts)
-  int buffer = (int)round(parTicksTarget * bufferFraction);
+  // Returns the target speed at the current tick position:
+  // - acceleration ramp for the first 1/10 of the movement
+  // - full speed in the middle
+  // - deceleration ramp for the last 1/6 of the movement
+  double accelFraction = 1.0 / 10.0, brakeFraction = 1.0 / 6.0;
+  int accelBuffer = (int)round(parTicksTarget * accelFraction);
+  int brakeBuffer = (int)round(parTicksTarget * brakeFraction);
 
-  if (abs(tickCount) < buffer) { //acceleration part (first ticks)
-    velocity = map((int)abs(tickCount), 0, buffer, velStart, velMax); //convert tickCount from its range (0 - tick of the buffer portion) to another one (velStart - velMax)
-  } else if ((parTicksTarget - abs(tickCount)) < buffer) { //brake part (last ticks)
-    velocity = map((int)(parTicksTarget - abs(tickCount)), 0, buffer, velStart, velMax); 
-  } else { //middle part (max velocity)
+  int velocity;
+  if (abs(tickCount) < accelBuffer) {
+    velocity = map((int)abs(tickCount), 0, accelBuffer, velStart, velMax);
+  } else if ((parTicksTarget - abs(tickCount)) < brakeBuffer) {
+    velocity = map((int)(parTicksTarget - abs(tickCount)), 0, brakeBuffer, velStart, velMax);
+  } else {
     velocity = velMax;
   }
 
-  velocity = constrain(velocity, velStart, velMax); //keeps the velocity over the minimum velocity to move and the max velocity
-
-  return velocity;
+  return constrain(velocity, velStart, velMax);
 }
 
 double normalizeAngle(double angle) {
@@ -383,52 +413,41 @@ double normalizeAngle(double angle) {
 }
 
 double angleError(double parTarget, double parCurrent) {
-  double error = parTarget - parCurrent;
-  error = normalizeAngle(parTarget - parCurrent);
-  return error;
+  return normalizeAngle(parTarget - parCurrent);
 }
 
 void rotate(double parTargetDelta) {
-  double kp = 3.0, ki = 0.0, kd = 0.05, integral = 0.0;
+  double kp = 40.0, ki = 0.0, kd = 0.55, integral = 0.0;
   parTargetDelta = normalizeAngle(parTargetDelta);
   double prevError = parTargetDelta;
-  leggiGyro();
-  double startAngle = getX();
-  unsigned long lastTime = millis();
 
+  leggiGyro();
+  double startAngle = rifAngle;
+  unsigned long lastTime = millis();
   bool isArrived = false;
+
   while (!isArrived) {
-    checkSerial();
     leggiGyro();
     double currentAngle = getX();
     double currentDelta = normalizeAngle(currentAngle - startAngle);
     double error = parTargetDelta - currentDelta;
-    //Serial.println(error);
 
-    if (fabs(error) < 0.05) {      
+    if (fabs(error) < 0.05) {
       stopMotori();
       isArrived = true;
     } else {
       unsigned long now = millis();
       float secondsPassed = (now - lastTime) / 1000.0;
       lastTime = now;
-
       integral += error * secondsPassed;
       double derivative = (error - prevError) / secondsPassed;
       prevError = error;
+
       double outputPid = kp * error + ki * integral + kd * derivative;
+      outputPid = constrain(outputPid, -255.0, 255.0);
 
-      if (outputPid > 255) {
-        outputPid = 255;
-      } else if (outputPid < -255) {
-        outputPid = -255;
-      }
-
-      if (outputPid > 0 && outputPid < 155) {
-        outputPid = 155;
-      } else if (outputPid > -155 && outputPid < 0) {
-        outputPid = -155;
-      }
+      if (outputPid > 0 && outputPid < 75)        outputPid = 75;
+      else if (outputPid > -75 && outputPid < 0)  outputPid = -75;
 
       if (outputPid > 0) {
         sinistra((int)fabs(outputPid));
@@ -440,15 +459,14 @@ void rotate(double parTargetDelta) {
   Serial.println("1");
 }
 
-#pragma endregion
-
-#pragma region VITTIME
+#pragma region VICTIMS
 
 void blinkVictim() {
-  for ( int i = 0; i < 5; i++) { //it repeat for five times and alternate by a half second beetween on/off
-    digitalWrite( ledVictim, HIGH);
+  // Blink the victim LED 5 times with 500ms on/off interval as required by the rules
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(ledVictim, HIGH);
     delay(500);
-    digitalWrite( ledVictim, LOW);
+    digitalWrite(ledVictim, LOW);
     delay(500);
   }
 }
@@ -469,28 +487,21 @@ void checkSerial() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
     stopMotori();
-    //blinkVictim();
-    if ( cmd == 'U' || cmd == 'u' ){
-      Serial.println("Victim: Unharmed ");
-    } else if ( cmd == 'H' || cmd == 'h' ){
+    if (cmd == 'U' || cmd == 'u') {
+      Serial.println("Victim: Unharmed");
+    } else if (cmd == 'H' || cmd == 'h') {
       Serial.print("Victim: Harmed ");
       if (cmd == 'h') {
         Serial.println("left");
-        //shootLeft();
-        //shootLeft();
-      } else { //it's not lowercase, so it's uppercase (right)
+      } else {
         Serial.println("right");
-        //shootRight();
-        //shootRight();
       }
-    } else if ( cmd == 'S' || cmd == 's' ){
+    } else if (cmd == 'S' || cmd == 's') {
       Serial.print("Victim: Stable ");
       if (cmd == 's') {
         Serial.println("left");
-        //shootLeft();
-      } else { //it's not lowercase, so it's uppercase (right)
+      } else {
         Serial.println("right");
-        //shootRight();
       }
     }
     delay(1500);
@@ -504,7 +515,7 @@ void setup() {
   Wire.begin();
   while (!Serial) delay(10);
 
-  //setting motors and encorder's pins
+  // Motor and encoder pins
   pinMode(PWMA, OUTPUT);
   pinMode(AIN1, OUTPUT);
   pinMode(AIN2, OUTPUT);
@@ -512,25 +523,24 @@ void setup() {
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
 
-  //setting tofs, gyro and color sensors
+  // TOF shutdown pins
   pinMode(SHT_LOX1, OUTPUT);
   pinMode(SHT_LOX2, OUTPUT);
   pinMode(SHT_LOX3, OUTPUT);
   pinMode(SHT_LOX4, OUTPUT);
+  pinMode(SHT_LOX5, OUTPUT);
+  pinMode(SHT_LOX6, OUTPUT);
   aggiornaMappaTof();
 
   setIndirizzo();
-
   iniziaGyro();
 
-  // encoder
+  // Encoder interrupt
   pinMode(signalA, INPUT);
   pinMode(signalB, INPUT);
   attachInterrupt(digitalPinToInterrupt(signalA), encoderReading, RISING);
 
-  //interrupt for black tile
-  //pinMode(19, INPUT);
-  //attachInterrupt(digitalPinToInterrupt(19), isBlack, RISING);
+  // Reset button interrupt
   pinMode(2, INPUT);
   attachInterrupt(digitalPinToInterrupt(2), reset, RISING);
 
@@ -541,97 +551,118 @@ void setup() {
 void loop() {
   if (Serial.available()) {
     char chr = Serial.read();
+
     #pragma region IDX
-    if (chr == 'g') {  //x axis on the gyro
+    if (chr == 'g') {        // gyro X axis (heading)
       idx = 10;
       val_idx = 0;
     }
-    if (chr == 'w')  // Movement command
-    {
+    if (chr == 'w') {        // movement command
       idx = 8;
       val_idx = 0;
-    } else if (chr == 'm') {  //wall check
+    } else if (chr == 'm') { // TOF wall check
       idx = 1;
       val_idx = 0;
-    } else if (chr == 's')  //change direction
-    {
+    } else if (chr == 's') { // invert robot direction
       idx = 2;
       val_idx = 0;
     } else if (chr == 'f') {
       idx = 7;
       val_idx = 0;
-    } else if (chr == 'a') {
+    } else if (chr == 'a') { // rotate left
       idx = 5;
       val_idx = 0;
-    } else if (chr == 'd') {
+    } else if (chr == 'd') { // rotate right
       idx = 6;
       val_idx = 0;
-    } else if (chr == 'i') { //y axis from the gyro (inclination)
+    } else if (chr == 'i') { // gyro Y axis (pitch/inclination)
       idx = 3;
       val_idx = 0;
     }
-
     #pragma endregion
 
-    // Separator
     else if (chr == ',') {
       Serial.println("True");
-      val = atoi(value);  // Convert received number string to int
+      val = atoi(value);
       Serial.flush();
+
       if (idx == 8) {
-        cmTarget = val;
+        // Movement: value is distance in cm, converted to ticks
+        cmTarget   = val;
         tickTarget = 1000 * cmTarget / 30;
         Serial.println(tickTarget);
         moveRobot(tickTarget);
-      } else if (idx == 1) {  //lettura Tof
+
+      } else if (idx == 1) {
+        // TOF reading: 1=front, 2=right-front, 3=right-back, 4=back, 5=left-back, 6=left-front
         if (val == 1) {
-          //Serial.println(leggiTof(*tofFrontShort));
-          leggiTof(*tofFrontShort);
+          leggiTof(*tofFront);
           Serial.println(isMuro);
         } else if (val == 2) {
-          //Serial.println(leggiTof(*tofRightShort));
-          leggiTof(*tofRightShort);
+          leggiTof(*tofRightFront);
           Serial.println(isMuro);
-        } else if (val == 3) { //back
-          //Serial.println(leggiTof(*tofLeftShort));
-          leggiTof(*tofLeftShort);
+        } else if (val == 3) {
+          leggiTof(*tofRightBack);
           Serial.println(isMuro);
-        } else { //left
-          //Serial.println(leggiTof(*tofBackShort));
-          leggiTof(*tofBackShort);
+        } else if (val == 4) {
+          leggiTof(*tofBack);
+          Serial.println(isMuro);
+        } else if (val == 5) {
+          leggiTof(*tofLeftBack);
+          Serial.println(isMuro);
+        } else if (val == 6) {
+          leggiTof(*tofLeftFront);
           Serial.println(isMuro);
         }
+
       } else if (idx == 2) {
+        // Invert robot direction and remap TOF pointers accordingly
         isInvertito = !isInvertito;
-        //scambio tof corti
         aggiornaMappaTof();
+
       } else if (idx == 3) {
+        // Read pitch (inclination) from gyro
         leggiGyro();
         Serial.println(getY());
-      } else if (idx == 5)  //SINISTRA
-      {
+
+      } else if (idx == 5) {
+        // Rotate left
         if (!isInvertito) {
+          Serial.println(rifAngle);
           rotate(val);
+          rifAngle += 90;
         } else {
+          Serial.println(rifAngle);
           rotate(-val);
+          rifAngle -= 90;
         }
+
       } else if (idx == 6) {
+        // Rotate right
         if (!isInvertito) {
+          Serial.println(rifAngle);
           rotate(-val);
+          rifAngle -= 90;
         } else {
+          Serial.println(rifAngle);
           rotate(val);
+          rifAngle += 90;
         }
+
       } else if (idx == 10) {
+        // Read heading (yaw) from gyro
         leggiGyro();
         Serial.println(getX());
       }
-      // reset the angle
+
+      // Reset value buffer
       value[0] = '0';
       value[1] = '0';
       value[2] = '0';
       value[3] = '\0';
-    } else  // Store digits into value array
-    {
+
+    } else {
+      // Store incoming digit characters into value buffer
       value[val_idx] = chr;
       val_idx++;
     }
